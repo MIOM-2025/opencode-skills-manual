@@ -207,3 +207,14 @@ bili.comment({ bvid, message, timestamp_seconds: 5, confirm: true })
 | `86038` | 登录链接过期，重新生成 |
 | 评论 `-111` | `bili_jct` 缺失或过期，重新登录 |
 | 评论 `12002` | 内容长度/敏感词/频率限制，换内容或稍后再试 |
+
+## 环境要求
+
+| 项目 | 要求 |
+| --- | --- |
+| 运行时 | Node.js 24+（只使用内置模块，无需 npm 依赖） |
+| 系统命令 | `curl`（可选，调试用） |
+| 网络 | 可访问 `api.bilibili.com`、`bilibili.com`、`i0.hdslb.com` |
+| 凭证 | `~/.cache/opencode/bili/cookies.txt`，扫码登录后自动生成 |
+| 写操作 | cookie 必须包含 `bili_jct`（CSRF token），否则点赞/评论/弹幕会失败 |
+

@@ -1,6 +1,6 @@
 ---
 name: QQ Bot Bridge (官方 QQ 机器人控制 OpenCode)
-description: "This phone runs an official Tencent QQ bot (AppID 1905898046, bot MIOM-Opencode) that bridges QQ private/group chat to OpenCode sessions. Use whenever the user asks to read QQ messages, reply to someone on QQ, send a file to QQ, check who messaged the bot, manage the bot service, list/switch/delete bridged OpenCode sessions, or troubleshoot the QQ bridge. Chinese triggers:「QQ 有人找我吗」「看看 QQ」「回复 QQ」「发文件给他」「机器人状态」「重启 QQ 桥」."
+description: "This phone runs an official Tencent QQ bot (AppID <QQ_APP_ID>, bot my-opencode-bot) that bridges QQ private/group chat to OpenCode sessions. Use whenever the user asks to read QQ messages, reply to someone on QQ, send a file to QQ, check who messaged the bot, manage the bot service, list/switch/delete bridged OpenCode sessions, or troubleshoot the QQ bridge. Chinese triggers:「QQ 有人找我吗」「看看 QQ」「回复 QQ」「发文件给他」「机器人状态」「重启 QQ 桥」."
 ---
 
 # QQ Bot Bridge
@@ -77,3 +77,17 @@ qq start | stop | restart
 `~/qqbot/bridge.py`（主程序）· `config.yaml`（凭据/模型）· `state.json`（会话映射）· `contacts.json`（msg_id）· `history/`（聊天记录）· `bridge.log`
 
 改配置后：`qq restart && qq status`。**有任务在跑时不要 restart**（会丢回复）。
+
+## 环境要求
+
+| 项目 | 要求 |
+| --- | --- |
+| 运行时 | Python 3.10+ |
+| Python 包 | `aiohttp`、`PyYAML` |
+| 程序文件 | `~/qqbot/bridge.py`、`config.yaml`（QQ 机器人 AppID/Secret）、`qq` CLI |
+| 外部服务 | 本机 `opencode` CLI/服务在运行；QQ 开放平台机器人已创建并上线 |
+| 网络 | 能访问 QQ 开放平台网关（WebSocket/HTTP） |
+| 权限 | 机器人需被私聊或拉进群；群消息需要 `group_openid` |
+| 本地文件 | `~/qqbot/history/`（聊天记录）、`bridge.log`、`bridge.lock` |
+| 限制 | 单文件约 7MB（私聊）/10MB（群）；被动回复窗口 5 分钟 |
+

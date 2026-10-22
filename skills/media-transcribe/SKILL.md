@@ -54,3 +54,16 @@ media.transcribe({
 - 只读本地文件，不上传音频。
 - 不自动播放声音。
 - 输出目录可写即可，不修改源文件。
+
+## 环境要求
+
+| 项目 | 要求 |
+| --- | --- |
+| 运行时 | Python 3.10+ |
+| Python 包 | `sherpa-onnx`（离线推理） |
+| 系统命令 | `ffmpeg`、`ffprobe`（抽音频、转 16k 单声道） |
+| 模型 | `sherpa-onnx-paraformer-zh-small-2024-03-09`，约 80MB |
+| 模型目录 | `~/.cache/opencode/asr/models/` |
+| 磁盘 | 建议 ≥200MB（模型 + 中间 wav） |
+| 网络 | 不需要，完全离线 |
+

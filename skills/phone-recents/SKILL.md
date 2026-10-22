@@ -35,3 +35,13 @@ phone_key { "key": "recents" }
 - 如果 recents 没反应，改用 `phone-home` 回桌面再 `phone_open` 目标 App。
 
 相关技能：`phone-back`、`phone-home`、`phone-control`。
+
+## 环境要求
+
+| 项目 | 要求 |
+| --- | --- |
+| 运行时 | OpenCode mobile-use 插件（`phone_key` 工具） |
+| 通道 | Portal（推荐）或 adb，插件会自动回退 |
+| 权限 | Portal 无障碍服务，或 Android USB/无线调试 |
+| 网络 | 仅本机回环 |
+

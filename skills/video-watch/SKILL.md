@@ -65,3 +65,15 @@ bili.comments({ bvid: "BV1BG8b6QEFU" })
 - `media.frames` 只下载视频流，不播放、不自动上传。
 - 点评是公开写入；用户明确要求后才发，发出后回读确认。
 - 不对未授权的视频批量评论；测试优先用自己账号的视频。
+
+## 环境要求
+
+| 项目 | 要求 |
+| --- | --- |
+| 运行时 | OpenCode 工具（`bili.*`、`media.*`） |
+| 系统命令 | `ffmpeg`（抽帧、contact sheet） |
+| 转写 | 同 `media-transcribe`：Python 3 + `sherpa-onnx` + Paraformer 模型 |
+| 网络 | 可访问 B 站（取流、字幕、评论） |
+| 写操作 | 发评论需要 B 站登录 cookie（含 `bili_jct`） |
+| 磁盘 | 视频缓存 + 抽帧，建议预留数百 MB |
+

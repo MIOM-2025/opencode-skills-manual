@@ -110,7 +110,7 @@ cat ~/portal/token               # Portal bearer token (36 chars)
 ~/portal/pctl.sh phone           # which app is in the foreground right now
 ```
 
-- adb drops often and the wireless port changes each time: `adb connect 192.168.2.168:<port>`; `Connection refused` = ask the user for the new `IP:port` from Settings → Developer options → Wireless debugging (this adb has no mdns).
+- adb drops often and the wireless port changes each time: `adb connect <phone-ip>:<port>`; `Connection refused` = ask the user for the new `IP:port` from Settings → Developer options → Wireless debugging (this adb has no mdns).
 - If adb is dead you are **not** blocked — Portal is local and needs no adb.
 
 ## 2. Read the screen
@@ -217,3 +217,15 @@ adb shell "md5sum '$M/data/substates/GameOver.hx'"   # always verify after push
 These are **reference implementations, not the engine**. Do it yourself, one step at a time, on the tree you just read.
 Never answer "there's a script for that, run it" and never fire a whole script at a screen you have not just confirmed —
 the user has rejected that explicitly.
+
+## 环境要求
+
+| 项目 | 要求 |
+| --- | --- |
+| 运行时 | OpenCode mobile-use 插件（`phone_*` 工具） |
+| 通道 1 | Portal App，HTTP `127.0.0.1:8080`，token 在 `~/portal/token` |
+| 通道 2 | adb（platform-tools 1.0.41+），USB 或无线调试 `adb connect <phone-ip>:<port>` |
+| 权限 | 无障碍服务；无线调试需在开发者选项里配对，端口每次可能变化 |
+| 网络 | Portal 走回环；adb 无线走局域网 |
+| 可选 | `termux-toast`、`screencap`（系统自带） |
+

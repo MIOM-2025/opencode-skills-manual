@@ -59,3 +59,14 @@ pq step "scrollto:关于手机" "tap:关于手机" "wait:版本号" "shot"
 5. **验证看回读行**：`✓ tap「…」→ app=… 目标文案数=N`；数量变 0 = 页面跳转/内容已变。
 6. 屏幕 1080×2412 竖屏；坐标一律用 `pq` 自己算，不要手写。
 7. `PQ_QUIET=1` 静音 toast（批量时用）；截图文件优先 `~/.cache/pq/`（手机没有 /tmp）。
+
+## 环境要求
+
+| 项目 | 要求 |
+| --- | --- |
+| 运行时 | `pq`（bash 脚本，需在 PATH 中） |
+| 系统命令 | `curl`、`jq`、`adb`（兜底），可选 `termux-toast` |
+| 通道 | Portal `http://127.0.0.1:8080`，token 读 `~/portal/token`；失败自动切 adb |
+| 权限 | Portal 无障碍服务，或 USB/无线调试 |
+| 缓存 | `~/.cache/pq/`（UI 树、节点索引） |
+

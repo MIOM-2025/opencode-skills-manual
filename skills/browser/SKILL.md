@@ -51,7 +51,7 @@ node "$FETCH" https://www.bilibili.com --out ~/.cache/opencode/browser/home.html
   "description": "...",
   "text": "正文预览（默认 12000 字）",
   "links": [{"text": "...", "url": "..."}],
-  "savedTo": "/data/data/com.termux/files/home/.cache/opencode/browser/last-response.bin"
+  "savedTo": "$HOME/.cache/opencode/browser/last-response.bin"
 }
 ```
 
@@ -122,3 +122,13 @@ curl -sS -A "$UA" -b cookies.txt \
 | 429 | 等待，别重试风暴 |
 | 乱码 | 检查 `content-type` 的 charset；`fetch.js` 会尝试解码 |
 | 登录态丢失 | 重新走站点的登录流程；不要猜 cookie |
+
+## 环境要求
+
+| 项目 | 要求 |
+| --- | --- |
+| 运行时 | Node.js 24+（只使用内置模块） |
+| 网络 | 能访问目标站点 |
+| 输出目录 | `~/.cache/opencode/browser/`（响应体缓存） |
+| 可选 | 无头解析；不执行 JavaScript，需要 JS 的页面请用真实浏览器 |
+

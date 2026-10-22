@@ -71,3 +71,14 @@ gopeed add "https://..." --path "/storage/emulated/0/Download/Gopeed"
 - 用户给的是网页而不是直链时，先说明“这是网页，不一定能直接下”；能拿到真实文件 URL 再 add。
 - 不要用 `phone_media` 之类的媒体控制来“暂停下载”；下载任务用 `gopeed pause`。
 - 不要在 Gopeed 里重复添加同一 URL；先 `gopeed list` 看有没有已存在/已完成的任务。
+
+## 环境要求
+
+| 项目 | 要求 |
+| --- | --- |
+| 运行时 | Android 版 Gopeed（1.9+），在「设置 → 高级 → API」启动服务，监听 `127.0.0.1:9999` |
+| 系统命令 | `curl`、`jq` |
+| 权限 | 允许 Gopeed 后台运行、关闭电池优化，否则 API 会被系统冻结 |
+| 网络 | 下载任务本身需要外网 |
+| 可选 | 开了「接口令牌」时，通过 `GOPEED_TOKEN` 或 `~/.config/gopeed/token` 提供 |
+

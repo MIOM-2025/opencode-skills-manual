@@ -7,7 +7,7 @@ description: "Read and operate GitHub without opening a browser or running shell
 
 > 原则：**能用 `github.*` 工具就不开 shell**。读、写、建仓库、发文件、发 Issue/PR 都有对应工具；只有需要本地 git 历史（clone 后改代码再 push）时才落到命令行。
 
-登录态已经配好（账号 @MIOM-2025），工具直接调用即可。
+登录态配好后（账号 @your-account），工具直接调用即可。
 
 ## 工具清单（23 个）
 
@@ -70,9 +70,9 @@ github.pr({repo, number:45})
 
 ```
 github.repo_create({name:"opencode-skills-manual", description:"…"})
-github.put_file({repo:"MIOM-2025/opencode-skills-manual", path:"README.md", content:"…"})
+github.put_file({repo:"your-account/opencode-skills-manual", path:"README.md", content:"…"})
 github.push_local({
-  repo:"MIOM-2025/opencode-skills-manual",
+  repo:"your-account/opencode-skills-manual",
   files:[{local:"~/.config/opencode/skills/github/SKILL.md", remote:"skills/github/SKILL.md"}],
   message:"docs: add github skill",
 })
@@ -84,10 +84,10 @@ github.push_local({
 
 ```
 github.fork({repo:"owner/project"})
-github.clone({repo:"MIOM-2025/project"})
+github.clone({repo:"your-account/project"})
 # 本地改文件（read/write 工具）
 # 需要 git 时才用: git switch -c fix/typo && git commit && git push
-github.pr_create({repo:"owner/project", title:"fix: typo", head:"MIOM-2025:fix/typo"})
+github.pr_create({repo:"owner/project", title:"fix: typo", head:"your-account:fix/typo"})
 ```
 
 ## 命令行只留三类事
@@ -116,3 +116,15 @@ ghlogin           # 设备授权；完成后自动配置 git 凭据 + token
 - 私有仓库读不到时先怀疑权限（404 对未授权仓库是正常返回），别反复重试
 - `push_local` 只支持文本文件，单文件 ≤2MB、总量 ≤20MB、一次 ≤100 个
 - 403 + `rate limit` = 配额用完，`github.status` 看重置时间，别继续打
+
+## 环境要求
+
+| 项目 | 要求 |
+| --- | --- |
+| 运行时 | OpenCode 插件运行时（Bun）；`gh` CLI 2.40+；`git` 2.30+；`jq`（命令行 `ghs` 用） |
+| 认证 | 执行 `gh auth login --web`（设备码），scope：`repo`、`read:org`、`gist`、`workflow` |
+| 凭证文件 | `~/.config/gh/hosts.yml`；可选 `~/.config/github/token`（权限 600） |
+| 网络 | 可访问 `api.github.com`、`github.com` |
+| 配额 | 登录后 5000 次/小时；未登录 60 次/小时，且不能写 |
+| 本地目录 | `~/repos/`（`github.clone` 的默认目标） |
+
