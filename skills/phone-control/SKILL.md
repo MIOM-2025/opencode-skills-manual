@@ -227,5 +227,5 @@ the user has rejected that explicitly.
 | 通道 2 | adb（platform-tools 1.0.41+），USB 或无线调试 `adb connect <phone-ip>:<port>` |
 | 权限 | 无障碍服务；无线调试需在开发者选项里配对，端口每次可能变化 |
 | 网络 | Portal 走回环；adb 无线走局域网 |
-| 可选 | `termux-toast`、`screencap`（系统自带） |
+| 可选 | `termux-toast`、系统自带 `screencap` |
 

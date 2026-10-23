@@ -67,3 +67,7 @@ media.transcribe({
 | 磁盘 | 建议 ≥200MB（模型 + 中间 wav） |
 | 网络 | 不需要，完全离线 |
 
+## 附带脚本
+
+本目录 `scripts/` 下是手册对应的命令行实现（已脱敏，Termux 路径改为 `$HOME`/`$PREFIX`，shebang 统一为 `/usr/bin/env`）。
+

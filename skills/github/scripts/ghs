@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+# ghs — GitHub 快速命令行，包装已登录的 gh CLI，供不方便使用插件的 AI 直接调用
+set -euo pipefail
+
+die() { echo "错误：$*" >&2; exit 1; }
+
+norm() {
+  local r="$1"
+  r="${r#https://github.com/}"; r="${r#http://github.com/}"; r="${r#github.com/}"
+  r="${r%.git}"; r="${r%/}"
+  case "$r" in
+    */*) echo "$r" ;;
+    *) die "仓库格式应为 owner/repo，收到：$1" ;;
+  esac
+}
+
+need_auth() {
+  gh auth status >/dev/null 2>&1 || die "GitHub 未登录，先运行 ghlogin 完成授权"
+}
+
+uri() { jq -rn --arg s "$1" '$s|@uri'; }
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  help|--help|-h)
+    cat <<'EOF'
+ghs — GitHub 快速命令（包装 gh CLI）
+
+读：
+  ghs whoami                                    当前账号与配额
+  ghs search "<关键词>" [repos|code|issues|users|commits] [条数]
+  ghs repo <owner/repo> [--readme]              仓库详情
+  ghs readme <owner/repo> [ref]                 README 原文
+  ghs file <owner/repo> <path> [ref]            任意文件原文
+  ghs tree <owner/repo> [dir] [ref]             目录列表
+  ghs issues <owner/repo> [open|closed|all] [n] Issue 列表
+  ghs issue <owner/repo> <number>               Issue 正文 + 评论
+  ghs pulls <owner/repo> [open|closed|all] [n]  PR 列表
+  ghs pr <owner/repo> <number>                  PR 详情 + 文件 + 评论
+  ghs releases <owner/repo> [n]                 Release 列表
+
+写：
+  ghs fork <owner/repo> [org]                   复刻到自己的账号/组织
+  ghs star <owner/repo>                         收藏
+  ghs unstar <owner/repo>                       取消收藏
+  ghs clone <owner/repo> [目录]                 克隆（默认 ~/repos/<name>，depth=1）
+
+其他：
+  ghs api <path> [--method POST] [--input -]    直接调 REST API（JSON 参数用 gh 语法）
+  ghs login                                     等同于 ghlogin
+EOF
+    ;;
+
+  login)
+    exec ghlogin
+    ;;
+
+  whoami|status)
+    need_auth
+    gh auth status 2>&1 | sed 's/^/  /'
+    gh api user --jq '"@\(.login)  \(.name // "")  公开仓库 \(.public_repos)  粉丝 \(.followers)  关注 \(.following)"'
+    gh api rate_limit --jq '"API 配额：\(.resources.core.remaining)/\(.resources.core.limit)"'
+    ;;
+
+  search)
+    need_auth
+    q="${1:?用法: ghs search <关键词> [类型] [条数]}"
+    type="${2:-repos}"; n="${3:-10}"
+    case "$type" in
+      repos|repositories) endpoint=repositories ;;
+      *) endpoint="$type" ;;
+    esac
+    out="$(gh api "search/${endpoint}?q=$(uri "$q")&per_page=${n}")"
+    total="$(jq -r '.total_count' <<<"$out")"
+    echo "GitHub ${type} 搜索「${q}」— 共 ${total} 条"
+    echo
+    case "$type" in
+      repos|repositories)
+        jq -r '.items[] | "\(.full_name)  ★\(.stargazers_count)  \(.language // "-")  \(.pushed_at)\n    \(.description // "")\n    \(.html_url)"' <<<"$out" ;;
+      code)
+        jq -r '.items[] | "\(.repository.full_name) · \(.path)\n    \(.html_url)"' <<<"$out" ;;
+      issues)
+        jq -r '.items[] | "\(.repository_url | split("/repos/")[1]) #\(.number) [\(.state)] \(.title)  @\(.user.login)\n    \(.html_url)"' <<<"$out" ;;
+      users)
+        jq -r '.items[] | "@\(.login)  \(.type)\n    \(.html_url)"' <<<"$out" ;;
+      commits)
+        jq -r '.items[] | "\(.repository.full_name)@\(.sha[0:7])  \(.commit.message | split("\n")[0])\n    \(.html_url)"' <<<"$out" ;;
+      *)
+        jq -r '.' <<<"$out" ;;
+    esac
+    ;;
+
+  repo)
+    need_auth
+    r="$(norm "${1:?用法: ghs repo <owner/repo> [--readme]}")"; shift
+    gh api "repos/$r" | jq -r '"\(.full_name)\(if .private then "（私有）" else "" end)\n\(.description // "（无描述）")\n★ \(.stargazers_count)  复刻 \(.forks_count)  关注 \(.subscribers_count // .watchers_count)  Open issues \(.open_issues_count)\n语言 \(.language // "-")  License \(.license.spdx_id // "-")  默认分支 \(.default_branch)\n更新 \(.pushed_at)  大小 \(.size) KB\nTopics \(.topics // [] | join(", "))\n\(.html_url)"'
+    if [ "${1:-}" = "--readme" ]; then
+      echo; echo "──── README ────"
+      gh api -H "Accept: application/vnd.github.raw" "repos/$r/readme" || echo "（没有 README）"
+    fi
+    ;;
+
+  readme)
+    need_auth
+    r="$(norm "${1:?用法: ghs readme <owner/repo> [ref]}")"; ref="${2:-}"
+    gh api -H "Accept: application/vnd.github.raw" "repos/$r/readme${ref:+?ref=$ref}"
+    ;;
+
+  file)
+    need_auth
+    r="$(norm "${1:?用法: ghs file <owner/repo> <path> [ref]}")"
+    p="${2:?缺少文件路径}"; ref="${3:-}"
+    gh api -H "Accept: application/vnd.github.raw" "repos/$r/contents/${p}${ref:+?ref=$ref}"
+    ;;
+
+  tree)
+    need_auth
+    r="$(norm "${1:?用法: ghs tree <owner/repo> [dir] [ref]}")"
+    d="${2:-}"; ref="${3:-}"
+    gh api "repos/$r/contents/${d}${ref:+?ref=$ref}" \
+      | jq -r '.[] | if .type=="dir" then "  \(.name)/" else "  \(.name)  \(.size)B" end'
+    ;;
+
+  issues)
+    need_auth
+    r="$(norm "${1:?用法: ghs issues <owner/repo> [state] [n]}")"
+    state="${2:-open}"; n="${3:-15}"
+    gh api "repos/$r/issues?state=$state&per_page=100&sort=updated" \
+      | jq -r --argjson n "$n" '[.[] | select(.pull_request | not)][0:$n][] | "#\(.number) [\(.state)] \(.title)  @\(.user.login)  \(.comments)💬  \(.updated_at)\n    \(.html_url)"'
+    ;;
+
+  issue)
+    need_auth
+    r="$(norm "${1:?用法: ghs issue <owner/repo> <number>}")"
+    n="${2:?缺少 issue 编号}"
+    gh api "repos/$r/issues/$n" | jq -r '"#\(.number) [\(.state)] \(.title)\n@\(.user.login)  \(.created_at)  \(.comments) 条评论\n\n\(.body // "（无正文）")\n\n\(.html_url)"'
+    echo; echo "──── 最新评论 ────"
+    gh api "repos/$r/issues/$n/comments?per_page=10" \
+      | jq -r '.[] | "@\(.user.login)  \(.created_at)：\n\(.body)\n"'
+    ;;
+
+  pulls|prs)
+    need_auth
+    r="$(norm "${1:?用法: ghs pulls <owner/repo> [state] [n]}")"
+    state="${2:-open}"; n="${3:-15}"
+    gh api "repos/$r/pulls?state=$state&per_page=$n&sort=updated" \
+      | jq -r '.[] | "#\(.number) [\(.state)] \(.title)  @\(.user.login)  \(.head.label) → \(.base.label)\n    \(.html_url)"'
+    ;;
+
+  pr)
+    need_auth
+    r="$(norm "${1:?用法: ghs pr <owner/repo> <number>}")"
+    n="${2:?缺少 PR 编号}"
+    gh api "repos/$r/pulls/$n" | jq -r '"#\(.number) [\(.state)] \(.title)\n@\(.user.login)  \(.head.label) → \(.base.label)  更新 \(.updated_at)\n合并状态 \(.mergeable_state)  +\(.additions)/-\(.deletions)  \(.changed_files) 个文件\n\n\(.body // "（无正文）")\n\n\(.html_url)"'
+    echo; echo "──── 改动文件 ────"
+    gh api "repos/$r/pulls/$n/files?per_page=50" | jq -r '.[] | "\(.status)  \(.filename)  +\(.additions)/-\(.deletions)"'
+    ;;
+
+  releases)
+    need_auth
+    r="$(norm "${1:?用法: ghs releases <owner/repo> [n]}")"; n="${2:-10}"
+    gh api "repos/$r/releases?per_page=$n" \
+      | jq -r '.[] | "\(.tag_name)\(if .prerelease then "（pre）" else "" end)  \(.published_at)\n    \(.html_url)"'
+    ;;
+
+  fork)
+    need_auth
+    r="$(norm "${1:?用法: ghs fork <owner/repo> [org]}")"; org="${2:-}"
+    body='{}'
+    [ -n "$org" ] && body="{\"organization\":\"$org\"}"
+    gh api "repos/$r/forks" -X POST --input - <<<"$body" \
+      | jq -r '"已复刻 → \(.full_name // "（异步处理中）")\n\(.html_url // "")"'
+    ;;
+
+  star|unstar)
+    need_auth
+    r="$(norm "${1:?用法: ghs star|unstar <owner/repo>}")"
+    if [ "$cmd" = "star" ]; then gh api -X PUT "user/starred/$r"; else gh api -X DELETE "user/starred/$r"; fi
+    echo "已$([ "$cmd" = star ] && echo 收藏 || echo 取消收藏)：$r"
+    ;;
+
+  clone)
+    need_auth
+    r="$(norm "${1:?用法: ghs clone <owner/repo> [目录]}")"
+    dest="${2:-$HOME/repos/${r#*/}}"
+    mkdir -p "$(dirname "$dest")"
+    gh repo clone "$r" "$dest" -- --depth=1
+    echo "已克隆到 $dest"
+    ;;
+
+  api)
+    need_auth
+    gh api "$@"
+    ;;
+
+  *)
+    die "未知命令：$cmd（运行 ghs help 查看用法）"
+    ;;
+esac

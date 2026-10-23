@@ -217,7 +217,7 @@ phone_dump_ui 看 → phone_tap/type/key 做 → 结果自带 auto UI 快照 →
 | 运行时 | `ai` CLI（bash 脚本，需在 PATH 中） |
 | 系统命令 | `curl`、`jq` |
 | 配置文件 | `~/.config/ai/providers.conf`（格式：别名\|类型\|base_url\|模型\|密钥环境变量） |
-| 模型服务 | 通过本机 OpenCode 服务或任意 OpenAI 兼容端点；`ai oc-models` 需要 OpenCode 服务在运行 |
+| 模型服务 | 本机 OpenCode 服务或任意 OpenAI 兼容端点；`ai oc-models` 需要 OpenCode 服务在运行 |
 | 网络 | 需要访问所配置的模型服务 |
 | 密钥 | 不硬编码，按 providers.conf 里写的环境变量提供 |
 | 可选文档 | `~/AI_MANUAL.md`、`~/AI_BRIDGE.md` |

@@ -70,3 +70,7 @@ pq step "scrollto:关于手机" "tap:关于手机" "wait:版本号" "shot"
 | 权限 | Portal 无障碍服务，或 USB/无线调试 |
 | 缓存 | `~/.cache/pq/`（UI 树、节点索引） |
 
+## 附带脚本
+
+本目录 `scripts/` 下是手册对应的命令行实现（已脱敏，Termux 路径改为 `$HOME`/`$PREFIX`，shebang 统一为 `/usr/bin/env`）。
+

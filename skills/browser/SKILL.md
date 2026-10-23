@@ -130,5 +130,9 @@ curl -sS -A "$UA" -b cookies.txt \
 | 运行时 | Node.js 24+（只使用内置模块） |
 | 网络 | 能访问目标站点 |
 | 输出目录 | `~/.cache/opencode/browser/`（响应体缓存） |
-| 可选 | 无头解析；不执行 JavaScript，需要 JS 的页面请用真实浏览器 |
+| 注意 | 不执行 JavaScript，需要 JS 的页面请用真实浏览器 |
+
+## 附带脚本
+
+本目录 `scripts/` 下是手册对应的命令行实现（已脱敏，Termux 路径改为 `$HOME`/`$PREFIX`，shebang 统一为 `/usr/bin/env`）。
 

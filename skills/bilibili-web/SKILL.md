@@ -218,3 +218,7 @@ bili.comment({ bvid, message, timestamp_seconds: 5, confirm: true })
 | 凭证 | `~/.cache/opencode/bili/cookies.txt`，扫码登录后自动生成 |
 | 写操作 | cookie 必须包含 `bili_jct`（CSRF token），否则点赞/评论/弹幕会失败 |
 
+## 附带脚本
+
+本目录 `scripts/` 下是手册对应的命令行实现（已脱敏，Termux 路径改为 `$HOME`/`$PREFIX`，shebang 统一为 `/usr/bin/env`）。
+

@@ -128,3 +128,7 @@ ghlogin           # 设备授权；完成后自动配置 git 凭据 + token
 | 配额 | 登录后 5000 次/小时；未登录 60 次/小时，且不能写 |
 | 本地目录 | `~/repos/`（`github.clone` 的默认目标） |
 
+## 附带脚本
+
+本目录 `scripts/` 下是手册对应的命令行实现（已脱敏，Termux 路径改为 `$HOME`/`$PREFIX`，shebang 统一为 `/usr/bin/env`）。
+

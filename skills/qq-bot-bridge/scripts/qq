@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""qq —— 在 OpenCode/Termux 这边查看和操作 QQ 机器人会话。
+
+用法：
+  qq status              运行状态
+  qq tail [N]            最近 N 条收发消息（默认 20）
+  qq send <文本>          以机器人身份发给最近私聊的人（5 分钟被动回复窗口内）
+  qq send -g <group_openid> <文本>
+  qq sessions            列出所有桥接会话
+  qq start|stop|restart  启停服务
+  qq log [N]             最近 N 行运行日志
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+BASE = Path.home() / "qqbot"  # 运行数据目录（服务本体所在）
+sys.path.insert(0, str(BASE))
+
+os.environ.setdefault("QQ_QUIET", "1")  # CLI 不要污染 bridge.log
+import bridge  # noqa: E402
+
+
+def read_pid() -> int | None:
+    p = BASE / "bridge.pid"
+    if not p.exists():
+        return None
+    try:
+        return int(p.read_text().strip())
+    except Exception:
+        return None
+
+
+def alive(pid: int | None) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def cmd_status() -> int:
+    pid = read_pid()
+    print(f"服务：{'运行中' if alive(pid) else '未运行'}  PID={pid or '-'}")
+    print(f"AppID：{bridge.APP_ID or '(未配置)'}")
+    print(f"工作区：{bridge.WORKSPACE}")
+    c = bridge.load_contacts()
+    lp = c.get("last_private")
+    if lp:
+        print(f"最近私聊：{lp.get('name') or '(未命名)'}  openid={lp['openid'][:16]}…")
+    log = BASE / "bridge.log"
+    if log.exists():
+        tail = log.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-5:]
+        print("最近日志：")
+        for line in tail:
+            print("  " + line)
+    return 0
+
+
+def cmd_tail(n: int) -> int:
+    p = bridge.MSGLOG_PATH
+    if not p.exists():
+        print("还没有消息记录")
+        return 0
+    lines = p.read_text(encoding="utf-8", errors="replace").strip().splitlines()
+    for line in lines[-n:]:
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        who = "我→QQ" if r["direction"] == "out" else "QQ→我"
+        scope = {"group": "群", "guild": "频道"}.get(r.get("type"), "私聊")
+        text = (r.get("text") or "").replace("\n", " ⏎ ")
+        print(f"{r['time']}  [{who}·{scope}]  {text[:200]}")
+    return 0
+
+
+def cmd_sessions() -> int:
+    st = bridge.STATE
+    if not st.sessions:
+        print("暂无会话")
+        return 0
+    for key, items in st.sessions.items():
+        cur = st.current.get(key)
+        print(f"\n{key}")
+        for name, s in items.items():
+            mark = "→" if name == cur else " "
+            print(f"  {mark} {name}  {s.session_id or '(首次对话时创建)'}")
+    return 0
+
+
+SEQ_FILE = BASE / ".cli_seq"
+
+
+def next_cli_seq() -> int:
+    """跨进程递增的 msg_seq：QQ 用 (msg_id, msg_seq) 去重，复用同一个会报 40054005。"""
+    last = 0
+    try:
+        last = int(SEQ_FILE.read_text().strip() or "0")
+    except Exception:
+        last = 0
+    seq = max(last + 1, int(time.time()))
+    try:
+        SEQ_FILE.write_text(str(seq))
+    except Exception:
+        pass
+    return seq
+
+
+def cmd_send(argv: list[str]) -> int:
+    group = False
+    gid_arg = ""
+    if argv and argv[0] in ("-g", "--group"):
+        group = True
+        argv = argv[1:]
+        if argv and argv[0].startswith(("G", "g")) and len(argv[0]) > 8:
+            gid_arg = argv[0]
+            argv = argv[1:]
+    if not argv:
+        print("用法：qq send [-g [group_openid]] <文本>")
+        return 2
+    text = " ".join(argv)
+
+    contacts = bridge.load_contacts()
+    if group:
+        groups = contacts.get("groups") or {}
+        if gid_arg:
+            entry = groups.get(gid_arg) or {}
+            gid = gid_arg
+        elif groups:
+            gid = max(groups, key=lambda k: float((groups[k] or {}).get("last_seen") or 0))
+            entry = groups[gid]
+        else:
+            print("没有已知群聊（群 openid 只在群里 @ 机器人之后才会出现）")
+            return 1
+        target = {"type": (entry or {}).get("type") or "group", "id": gid, "key": f"{((entry or {}).get('type') or 'group')}:{gid}"}
+    else:
+        entry = contacts.get("last_private")
+        if not entry:
+            print("还没有人私聊过机器人，无法主动发消息")
+            return 1
+        target = {"type": "private", "id": entry["openid"], "key": f"private:{entry['openid']}"}
+
+    msg_id = entry.get("last_msg_id") or ""
+    age = time.time() - float(entry.get("last_seen") or 0)
+    if age > 280:
+        print(f"⚠️ 距上次消息 {age/60:.1f} 分钟，超出 QQ 被动回复 5 分钟窗口，可能发送失败")
+
+    async def go() -> int:
+        api = bridge.QQBotAPI(bridge.APP_ID, bridge.CLIENT_SECRET)
+        await api.start()
+        try:
+            await api.send_text(target, text, msg_id, next_cli_seq())
+            bridge.log_msg("out", target, text, msg_id)
+            print("已发送")
+            return 0
+        except Exception as e:
+            print(f"发送失败：{e}")
+            return 1
+        finally:
+            await api.close()
+
+    return asyncio.run(go())
+
+
+def cmd_invite() -> int:
+    """打印把机器人拉进群的官方链接。"""
+    async def go() -> int:
+        api = bridge.QQBotAPI(bridge.APP_ID, bridge.CLIENT_SECRET)
+        await api.start()
+        try:
+            me = await api.get("/users/@me")
+            print(f"机器人：{me.get('username')}  ({me.get('id')})")
+            print(f"拉群链接：{me.get('share_url')}")
+            print("\n用法：手机打开该链接 → 选择要加入的群 → 由群主/管理员确认。")
+            return 0
+        finally:
+            await api.close()
+
+    return asyncio.run(go())
+
+
+def cmd_service(action: str) -> int:
+    script = BASE / ("run.sh" if action in ("start", "restart") else "stop.sh")
+    if action == "restart":
+        subprocess.run([str(BASE / "stop.sh")], capture_output=True)
+        time.sleep(1)
+        script = BASE / "run.sh"
+    r = subprocess.run([str(script)], capture_output=True, text=True)
+    print((r.stdout or "").strip() or (r.stderr or "").strip())
+    return r.returncode
+
+
+def cmd_log(n: int) -> int:
+    p = BASE / "bridge.log"
+    if not p.exists():
+        print("无日志")
+        return 0
+    for line in p.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-n:]:
+        print(line)
+    return 0
+
+
+def cmd_file(argv: list[str]) -> int:
+    """qq file [-g [group_openid]] <本地路径>
+    发到最近私聊，或指定/最近的群。超过 9MB 自动切片。"""
+    group = False
+    gid_arg = ""
+    if argv and argv[0] in ("-g", "--group"):
+        group = True
+        argv = argv[1:]
+        if argv and len(argv[0]) > 8 and argv[0][0] in "Gg":
+            gid_arg = argv[0]
+            argv = argv[1:]
+    if not argv:
+        print("用法：qq file [-g [group_openid]] <本地文件路径>")
+        return 2
+    path = Path(argv[0]).expanduser()
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve()
+    if not path.exists():
+        print(f"文件不存在：{path}")
+        return 1
+
+    contacts = bridge.load_contacts()
+    if group:
+        groups = contacts.get("groups") or {}
+        if gid_arg:
+            entry = groups.get(gid_arg) or {}
+            gid = gid_arg
+        elif groups:
+            gid = max(groups, key=lambda k: float((groups[k] or {}).get("last_seen") or 0))
+            entry = groups[gid]
+        else:
+            print("没有已知群聊（群 openid 只在群里 @ 机器人之后才会出现）")
+            return 1
+        target = {"type": (entry or {}).get("type") or "group", "id": gid, "key": f"{((entry or {}).get('type') or 'group')}:{gid}"}
+    else:
+        entry = contacts.get("last_private")
+        if not entry:
+            print("还没有人私聊过机器人，无法发送")
+            return 1
+        target = {"type": "private", "id": entry["openid"], "key": f"private:{entry['openid']}"}
+
+    msg_id = entry.get("last_msg_id") or ""
+    age = time.time() - float(entry.get("last_seen") or 0)
+    if age > 280:
+        print(f"⚠️ 距上次消息 {age/60:.1f} 分钟，超出 5 分钟被动回复窗口，可能失败")
+
+    size_mb = path.stat().st_size / 1048576
+    print(f"准备发送：{path.name}（{size_mb:.1f} MB）")
+
+    async def go() -> int:
+        api = bridge.QQBotAPI(bridge.APP_ID, bridge.CLIENT_SECRET)
+        await api.start()
+        try:
+            async def seq() -> int:
+                return next_cli_seq()
+            parts = await bridge.send_file_auto(api, target, msg_id, path, seq_getter=seq)
+            bridge.log_msg("out", target, f"[文件] {path.name}", msg_id)
+            print(f"已发送文件：{path.name}（{parts['sent']}/{parts['parts']} 条）")
+            return 0
+        except Exception as e:
+            print(f"发送失败：{e}")
+            return 1
+        finally:
+            await api.close()
+
+    return asyncio.run(go())
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if not argv:
+        print(__doc__)
+        return 0
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "status":
+        return cmd_status()
+    if cmd == "tail":
+        return cmd_tail(int(rest[0]) if rest else 20)
+    if cmd == "send":
+        return cmd_send(rest)
+    if cmd in ("file", "sendfile"):
+        return cmd_file(rest)
+    if cmd == "sessions":
+        return cmd_sessions()
+    if cmd == "invite":
+        return cmd_invite()
+    if cmd in ("start", "stop", "restart"):
+        return cmd_service(cmd)
+    if cmd == "log":
+        return cmd_log(int(rest[0]) if rest else 30)
+    print(f"未知命令：{cmd}")
+    print(__doc__)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

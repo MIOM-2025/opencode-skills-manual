@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# gopeed — control the Gopeed app through its local REST API.
+set -euo pipefail
+
+BASE="${GOPEED_URL:-http://127.0.0.1:9999}"
+BASE="${BASE%/}"
+TIMEOUT="${GOPEED_TIMEOUT:-10}"
+TOKEN="${GOPEED_TOKEN:-}"
+TOKEN_FILE="${GOPEED_TOKEN_FILE:-$HOME/.config/gopeed/token}"
+
+if [[ -z "$TOKEN" && -r "$TOKEN_FILE" ]]; then
+  TOKEN="$(<"$TOKEN_FILE")"
+fi
+TOKEN="$(printf '%s' "$TOKEN" | tr -d '\r\n')"
+
+die() {
+  printf 'gopeed: %s\n' "$*" >&2
+  exit 1
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || die "缺少命令：$1"
+}
+
+need curl
+need jq
+
+urlencode() {
+  jq -rn --arg s "$1" '$s | @uri'
+}
+
+api() {
+  local method="$1" path="$2" data="${3-}"
+  local args=(-sS --max-time "$TIMEOUT" -X "$method" "$BASE$path")
+  [[ -n "$TOKEN" ]] && args+=(-H "X-Api-Token: $TOKEN")
+  if [[ -n "$data" ]]; then
+    args+=(-H 'Content-Type: application/json' --data "$data")
+  fi
+
+  local out
+  if ! out="$(curl "${args[@]}")"; then
+    die "连接不到 Gopeed（$BASE）。请先启动 Gopeed，并在 设置 → 高级 → API 里启动服务，监听地址 127.0.0.1:9999"
+  fi
+  if ! jq -e . >/dev/null 2>&1 <<<"$out"; then
+    die "Gopeed 返回了非 JSON 内容：${out:0:300}"
+  fi
+
+  local code msg
+  code="$(jq -r '.code // empty' <<<"$out")"
+  if [[ "$code" != "0" ]]; then
+    msg="$(jq -r '.msg // "unknown error"' <<<"$out")"
+    if [[ "$code" == "1001" ]]; then
+      die "API 需要令牌：设置 GOPEED_TOKEN 或写入 ~/.config/gopeed/token（HTTP 头 X-Api-Token）"
+    fi
+    die "$msg（code=${code:-?}）"
+  fi
+
+  printf '%s\n' "$out"
+}
+
+cmd_health() {
+  local out version os arch
+  out="$(api GET /api/v1/info)"
+  version="$(jq -r '.data.version // "?"' <<<"$out")"
+  os="$(jq -r '.data.os // "?"' <<<"$out")"
+  arch="$(jq -r '.data.arch // "?"' <<<"$out")"
+  printf 'Gopeed %s (%s/%s) — %s\n' "$version" "$os" "$arch" "$BASE"
+}
+
+cmd_add() {
+  local url="" name="" path=""
+  while (($#)); do
+    case "$1" in
+      --name)
+        [[ $# -ge 2 ]] || die "--name 需要值"
+        name="$2"
+        shift 2
+        ;;
+      --path)
+        [[ $# -ge 2 ]] || die "--path 需要值"
+        path="$2"
+        shift 2
+        ;;
+      --)
+        shift
+        if (($#)); then
+          [[ -z "$url" ]] || die "一次只能添加一个链接"
+          url="$1"
+          shift
+        fi
+        break
+        ;;
+      -*)
+        die "未知参数：$1"
+        ;;
+      *)
+        [[ -z "$url" ]] || die "一次只能添加一个链接"
+        url="$1"
+        shift
+        ;;
+    esac
+  done
+  [[ -n "$url" ]] || die "用法：gopeed add <URL> [--name 名字] [--path 目录]"
+
+  local payload out id
+  payload="$(jq -cn --arg url "$url" --arg name "$name" --arg path "$path" '
+    {req: {url: $url}}
+    + (if ($name != "" or $path != "") then
+         {opts: ({name: $name, path: $path} | with_entries(select(.value != "")))}
+       else {} end)
+  ')"
+  out="$(api POST /api/v1/tasks "$payload")"
+  id="$(jq -r '.data' <<<"$out")"
+  printf '已添加：%s\n' "$id"
+  cmd_show "$id"
+}
+
+hsize_jq='
+def hsize:
+  if . >= 1073741824 then "\((. / 1073741824 * 10 | floor) / 10)G"
+  elif . >= 1048576 then "\((. / 1048576 * 10 | floor) / 10)M"
+  elif . >= 1024 then "\((. / 1024 * 10 | floor) / 10)K"
+  else "\(.)B" end;
+'
+
+cmd_list() {
+  local status="${1-}" path="/api/v1/tasks"
+  [[ -n "$status" ]] && path+="?status=$(urlencode "$status")"
+
+  local out count
+  out="$(api GET "$path")"
+  count="$(jq '.data | length' <<<"$out")"
+  if [[ "$count" == "0" ]]; then
+    printf '没有任务\n'
+    return 0
+  fi
+
+  printf '%-22s %-8s %-18s %-12s %s\n' ID STATUS PROGRESS SPEED NAME
+  jq -r "$hsize_jq"'
+    .data[]? |
+    . as $t |
+    ($t.meta.res.size // $t.progress.total // 0) as $total |
+    ($t.progress.downloaded // 0) as $done |
+    (if $total > 0 then "\(($done * 100 / $total) | floor)%" else "-" end) as $pct |
+    [
+      $t.id,
+      $t.status,
+      "\($done | hsize)/\($total | hsize) \($pct)",
+      "\(($t.progress.speed // 0) | hsize)/s",
+      (if ($t.name // "") != "" then $t.name else ($t.meta.opts.name // "-") end)
+    ] | @tsv
+  ' <<<"$out" | while IFS=$'\t' read -r id status progress speed name; do
+    printf '%-22s %-8s %-18s %-12s %s\n' "$id" "$status" "$progress" "$speed" "$name"
+  done
+}
+
+cmd_show() {
+  local id="${1-}"
+  [[ -n "$id" ]] || die "用法：gopeed show <task-id>"
+  local out
+  out="$(api GET "/api/v1/tasks/$id")"
+  jq -r "$hsize_jq"'
+    .data as $t |
+    ($t.meta.res.size // $t.progress.total // 0) as $total |
+    ($t.progress.downloaded // 0) as $done |
+    "id:       \($t.id)",
+    "name:     \(if ($t.name // "") != "" then $t.name else ($t.meta.opts.name // "-") end)",
+    "status:   \($t.status)",
+    "progress: \($done | hsize)/\($total | hsize)\(if $total > 0 then " (\(($done * 100 / $total) | floor)%)" else "" end)",
+    "speed:    \(($t.progress.speed // 0) | hsize)/s",
+    "path:     \($t.meta.opts.path // "-")",
+    "url:      \($t.meta.req.url // "-")"
+  ' <<<"$out"
+}
+
+cmd_wait() {
+  local id="${1-}" timeout="${2:-300}"
+  [[ -n "$id" ]] || die "用法：gopeed wait <task-id> [超时秒数]"
+  [[ "$timeout" =~ ^[0-9]+$ ]] || die "超时秒数必须是整数"
+
+  local interval="${GOPEED_WAIT_INTERVAL:-2}" start=$SECONDS out status
+  while :; do
+    out="$(api GET "/api/v1/tasks/$id")"
+    status="$(jq -r '.data.status' <<<"$out")"
+    printf '%-8s %s\n' "$status" "$(jq -r "$hsize_jq"'
+      .data as $t |
+      ($t.meta.res.size // $t.progress.total // 0) as $total |
+      ($t.progress.downloaded // 0) as $done |
+      "\($done | hsize)/\($total | hsize) (\(($t.progress.speed // 0) | hsize)/s)"
+    ' <<<"$out")"
+    case "$status" in
+      done)
+        return 0
+        ;;
+      error)
+        die "任务失败：$id"
+        ;;
+    esac
+    if (( SECONDS - start >= timeout )); then
+      printf '等待超时，任务仍在运行：%s\n' "$id" >&2
+      return 2
+    fi
+    sleep "$interval"
+  done
+}
+
+cmd_simple_action() {
+  local action="$1" id="${2-}"
+  [[ -n "$id" ]] || die "用法：gopeed $action <task-id>"
+  api PUT "/api/v1/tasks/$id/$action" >/dev/null
+  printf '%s: %s\n' "$action" "$id"
+}
+
+cmd_delete() {
+  local id="${1-}" force="false"
+  shift || true
+  for arg in "$@"; do
+    case "$arg" in
+      --force|-f) force="true" ;;
+      *) die "未知参数：$arg" ;;
+    esac
+  done
+  [[ -n "$id" ]] || die "用法：gopeed delete <task-id> [--force]"
+  local path="/api/v1/tasks/$id"
+  [[ "$force" == "true" ]] && path+="?force=true"
+  api DELETE "$path" >/dev/null
+  printf '已删除：%s%s\n' "$id" "$([[ "$force" == "true" ]] && echo '（含文件）' || echo '（保留文件）')"
+}
+
+usage() {
+  cat <<'EOF'
+用法: gopeed <命令> [参数]
+
+  health                      检查 Gopeed API
+  add <URL> [--name N] [--path P]  新建下载
+  list [status]               任务列表（running/done/pause/error/wait/ready）
+  show <id>                   任务详情
+  wait <id> [秒]              等待完成（默认 300 秒）
+  pause <id>                  暂停
+  resume <id>                 继续
+  delete <id> [--force]       删除；--force 连文件一起删
+
+环境变量:
+  GOPEED_URL        默认 http://127.0.0.1:9999
+  GOPEED_TOKEN      API 令牌（也可放 ~/.config/gopeed/token）
+  GOPEED_TIMEOUT    curl 超时秒数（默认 10）
+EOF
+}
+
+case "${1:-list}" in
+  health|info) cmd_health ;;
+  add|download) shift; cmd_add "$@" ;;
+  list|ls) shift; cmd_list "${1-}" ;;
+  show|status) shift; cmd_show "${1-}" ;;
+  wait) shift; cmd_wait "$@" ;;
+  pause) shift; cmd_simple_action pause "${1-}" ;;
+  resume|continue) shift; cmd_simple_action continue "${1-}" ;;
+  delete|rm) shift; cmd_delete "$@" ;;
+  help|-h|--help) usage ;;
+  *) usage; die "未知命令：$1" ;;
+esac

@@ -1,0 +1,460 @@
+#!/usr/bin/env bash
+# pq — 通用手机常用操作（phone quick ops）
+# 适配所有 App：无任何 App 专属包名 / 坐标 / 资源 id；一律按屏幕文字定位。
+# 找不到元素自动向上/向下滑屏搜索（两边滑到头为止）。
+# 通道：Portal(127.0.0.1:8080) 优先，掉线自动恢复；adb 兜底（树/截屏/按键）。
+# 用法: pq <cmd> [...]    帮助: pq help     详见 skills/phone-ops/SKILL.md
+set -u
+
+PORTAL_URL=${PORTAL_URL:-http://127.0.0.1:8080}
+TOK="$(cat "$HOME/portal/token" 2>/dev/null || true)"
+CACHE="$HOME/.cache/pq"; mkdir -p "$CACHE"; T="$CACHE/tree.json"; NT="$CACHE/nodes.tsv"
+PORTAL_OK=""
+QUIET=${PQ_QUIET:-0}          # PQ_QUIET=1 关闭屏幕 toast
+RE=${PQ_RE:-0}                # PQ_RE=1 关键词按正则匹配（默认纯文本、忽略大小写）
+AUTOSCROLL=${PQ_AUTOSCROLL:-1} # PQ_AUTOSCROLL=0 关闭自动滑屏搜索
+MAXSW=${PQ_MAX_SWIPES:-10}     # 自动滑屏最多滑动次数
+
+say()  { printf '%s\n' "$*"; }
+err()  { printf '✖ %s\n' "$*" >&2; }
+die()  { err "$*"; exit 1; }
+toast(){ [ "$QUIET" = 1 ] && return 0; termux-toast -g bottom "$1" >/dev/null 2>&1 || true; }
+
+G(){ curl -s -m 6 -H "Authorization: Bearer $TOK" "$PORTAL_URL$1"; }
+P(){ curl -s -m 10 -X POST -H "Authorization: Bearer $TOK" \
+     -H "Content-Type: application/x-www-form-urlencoded" --data "$2" "$PORTAL_URL/$1"; }
+
+portal_up(){ [ "$(G /ping 2>/dev/null | jq -r '.result // empty' 2>/dev/null)" = pong ]; }
+adb_ok(){ adb devices 2>/dev/null | awk 'NR>1 && $2=="device"{f=1} END{exit !f}'; }
+
+recover(){
+  adb_ok || { err "adb 未连接，无法自动恢复 Portal"; return 1; }
+  err "Portal 掉线，正在恢复…"
+  adb shell monkey -p com.mobilerun.portal -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+  sleep 4
+  adb shell content insert --uri content://com.mobilerun.portal/toggle_socket_server \
+      --bind enabled:b:true --bind port:i:8080 >/dev/null 2>&1
+  local i; for i in $(seq 1 20); do sleep 0.5; portal_up && return 0; done
+  return 1
+}
+ensure(){ # 通道检查（进程内缓存：整个 pq 调用只 ping 一次）
+  [ "$PORTAL_OK" = 1 ] && return 0
+  portal_up && { PORTAL_OK=1; return 0; }
+  recover && { PORTAL_OK=1; return 0; }
+  die "Portal 无法恢复（检查 Portal App 或无障碍服务）"
+}
+
+# ---------------- 树 ----------------
+# 统一节点流 = 13 列制表符 TSV：
+#   1 text | 2 desc | 3 class | 4 l | 5 t | 6 r | 7 b | 8 click | 9 edit | 10..13 可点祖先的 l t r b（空=无）
+fetch_tree(){ # → $T（Portal 完整树）；失败返回 1 并清缓存（让 nodes_tsv 走 adb 兜底）
+  local r; r="$(G "/state_full?filter=false")" || { rm -f "$T" "$NT"; return 1; }
+  printf '%s' "$r" | jq -er '.result' > "$T" 2>/dev/null || { rm -f "$T" "$NT"; return 1; }
+  rm -f "$NT"   # 树变了 → 失效 flatten 缓存
+}
+
+xml_tsv(){ # adb 兜底：uiautomator XML → 统一 TSV（无祖先列）
+  adb exec-out uiautomator dump /dev/stdout 2>/dev/null \
+  | sed 's/<node /\n<node /g' | grep '^<node ' \
+  | while IFS= read -r ln; do
+      tx="$(printf '%s' "$ln" | sed -n 's/.*[[:space:]]text="\([^"]*\)".*/\1/p')"
+      de="$(printf '%s' "$ln" | sed -n 's/.*[[:space:]]content-desc="\([^"]*\)".*/\1/p')"
+      cl="$(printf '%s' "$ln" | sed -n 's/.*[[:space:]]class="\([^"]*\)".*/\1/p')"
+      bb="$(printf '%s' "$ln" | sed -n 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/p')"
+      [ -z "$bb" ] && continue
+      ck=0; printf '%s' "$ln" | grep -q 'clickable="true"' && ck=1
+      ed=0; case "$cl" in *EditText*) ed=1;; esac
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t\t\t\t\n' "$tx" "$de" "$cl" $bb "$ck" "$ed"
+    done
+}
+
+nodes_tsv(){ # 统一节点流（flatten 结果进程内复用：一次 jq 解析，多次过滤）
+  if [ -s "$NT" ]; then cat "$NT"; return 0; fi
+  if [ -s "$T" ]; then
+    jq -r '
+      def rec($anc):
+        . as $n
+        | (if ($n.boundsInScreen?) then
+            [ ($n.text//""), ($n.contentDescription//""), ($n.className//""),
+              ($n.boundsInScreen.left|tostring), ($n.boundsInScreen.top|tostring),
+              ($n.boundsInScreen.right|tostring), ($n.boundsInScreen.bottom|tostring),
+              (if ($n.clickable//false) then "1" else "0" end),
+              (if ($n.isEditable//false) then "1" else "0" end),
+              (if $anc then ($anc.boundsInScreen.left|tostring)   else "" end),
+              (if $anc then ($anc.boundsInScreen.top|tostring)    else "" end),
+              (if $anc then ($anc.boundsInScreen.right|tostring)  else "" end),
+              (if $anc then ($anc.boundsInScreen.bottom|tostring) else "" end)
+            ] | @tsv
+          else empty end),
+          (($n.children // [])[] | rec( if ($n.clickable//false) then $n else $anc end ))
+        ;
+      (.a11y_tree // .) | rec(null)' "$T" > "$NT" 2>/dev/null && cat "$NT" || { rm -f "$NT"; xml_tsv; }
+  else
+    xml_tsv
+  fi
+}
+
+# 匹配：stdin=TSV；$1 关键词 → 输出「面积\t原行」；面积对小到退化的元素加罚（避免优先点到线/点）
+# 位置: 1 text 2 desc 3 class 4 l 5 t 6 r 7 b 8 click 9 edit
+match_nodes(){
+  local pat="$1"
+  if [ "$RE" = 1 ]; then
+    awk -F'\t' -v re="$pat" '
+      tolower($1" "$2) ~ tolower(re) {
+        a=($6-$4)*($7-$5); if (($7-$5)<=2 || ($6-$4)<=2) a+=5000000; print a "\t" $0 }'
+  else
+    awk -F'\t' -v re="$pat" '
+      index(tolower($1" "$2), tolower(re)) {
+        a=($6-$4)*($7-$5); if (($7-$5)<=2 || ($6-$4)<=2) a+=5000000; print a "\t" $0 }'
+  fi
+}
+
+field(){ printf '%s' "$1" | awk -F'\t' -v k="$2" '{print $k}'; }
+
+pick(){ # $1 关键词(空=任意) $2 序号 $3 模式(tap|edit) → "l\tt\tr\tb\tlabel"
+  local pat="$1" idx="${2:-1}" mode="${3:-tap}" lines row cls clk l t r b
+  if [ -z "$pat" ]; then
+    lines="$(nodes_tsv | awk -F'\t' '{a=($6-$4)*($7-$5); if (($7-$5)<=2 || ($6-$4)<=2) a+=5000000; print a "\t" $0}' | sort -n | cut -f2-)"
+  else
+    lines="$(nodes_tsv | match_nodes "$pat" | sort -n | cut -f2-)"
+  fi
+  [ -z "$lines" ] && return 0
+  case "$mode" in
+    edit) row="$(printf '%s\n' "$lines" | awk -F'\t' '$9=="1"' | sed -n "${idx}p")" ;;
+    *)    row="$(printf '%s\n' "$lines" | awk -F'\t' '$3 !~ /EditText/' | sed -n "${idx}p")"
+          [ -z "$row" ] && row="$(printf '%s\n' "$lines" | sed -n "${idx}p")" ;;
+  esac
+  [ -z "$row" ] && return 0
+  cls="$(field "$row" 3)"; clk="$(field "$row" 8)"
+  l="$(field "$row" 4)"; t="$(field "$row" 5)"; r="$(field "$row" 6)"; b="$(field "$row" 7)"
+  local al; al="$(field "$row" 10)"
+  if [ -n "$al" ] && { [ "$clk" != 1 ] || [ $((b-t)) -le 2 ] || [ $((r-l)) -le 2 ]; }; then
+    l="$al"; t="$(field "$row" 11)"; r="$(field "$row" 12)"; b="$(field "$row" 13)"
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\n' "$l" "$t" "$r" "$b" "$(printf '%s' "$row" | awk -F'\t' '{print ($1==""?$2:$1)}')"
+}
+
+swipe_up(){   P swipe "startX=540&startY=1900&endX=540&endY=1000&duration=280" >/dev/null; }  # 看下方内容
+swipe_down(){ P swipe "startX=540&startY=1000&endX=540&endY=1900&duration=280" >/dev/null; }  # 看上方内容
+tree_sig(){ nodes_tsv 2>/dev/null | md5sum | cut -d' ' -f1; }
+
+autosearch(){ # $1 关键词 $2 序号 $3 模式 → pick 行；找不到自动滑屏（上→下），滑到头为止
+  local pat="$1" idx="${2:-1}" mode="${3:-tap}" line dir=up flips=0 n=0 prev cur
+  line="$(pick "$pat" "$idx" "$mode")"
+  [ -n "$line" ] && { printf '%s' "$line"; return 0; }
+  [ "$AUTOSCROLL" = 0 ] && return 1
+  toast "▸ 没看到「$pat」，自动滑屏找"
+  while [ "$n" -lt "$MAXSW" ]; do
+    prev="$(tree_sig)"
+    if [ "$dir" = up ]; then swipe_up; else swipe_down; fi
+    toast "▸ 滑屏($dir) $((n+1)) 找「$pat」"
+    sleep 0.35; fetch_tree 2>/dev/null || return 1
+    cur="$(tree_sig)"
+    line="$(pick "$pat" "$idx" "$mode")"
+    [ -n "$line" ] && { printf '%s' "$line"; return 0; }
+    if [ "$cur" = "$prev" ]; then
+      flips=$((flips+1))
+      if [ "$flips" -eq 1 ]; then dir=down; toast "▸ 到底了，换方向($dir)"; else return 1; fi
+    fi
+    n=$((n+1))
+  done
+  return 1
+}
+
+tap_line(){ # $1 = pick 行 → 点中心 + 回读
+  local line="$1" x y lab
+  x=$(( ($(field "$line" 1) + $(field "$line" 3)) / 2 ))
+  y=$(( ($(field "$line" 2) + $(field "$line" 4)) / 2 ))
+  lab="$(field "$line" 5)"
+  toast "▸ tap「$lab」@$x,$y"
+  P tap "x=$x&y=$y" >/dev/null
+  sleep 0.3; fetch_tree 2>/dev/null
+  say "✓ tap「$lab」@$x,$y → app=$(fg_app)"
+}
+fg_app(){ G /phone_state 2>/dev/null | jq -r '.result' 2>/dev/null | jq -r '.currentApp // "?"' 2>/dev/null; }
+st_pkg(){ G /phone_state 2>/dev/null | jq -r '.result' 2>/dev/null | jq -r '.packageName // empty' 2>/dev/null; }
+
+# ---------------- 命令 ----------------
+cmd_now(){
+  local j; j="$(G /phone_state 2>/dev/null | jq -r '.result // empty' 2>/dev/null)"
+  if [ -n "$j" ]; then
+    printf '%s' "$j" | jq -r '"app=\(.currentApp // "-")  pkg=\(.packageName // "-")  kbd=\(.keyboardVisible)  edit=\(.isEditable)  focus=[\(.focusedElement.text // .focusedElement.contentDescription // "")]"'
+  else
+    err "Portal 不可用，用 adb 兜底："
+    adb shell dumpsys window 2>/dev/null | grep -m1 'mCurrentFocus'
+    adb shell dumpsys window 2>/dev/null | grep -m1 'mFocusedApp'
+  fi
+}
+
+cmd_ui(){ # ui [关键词] [最多N=40]
+  local pat="${1:-}" n="${2:-40}" out
+  ensure; fetch_tree || die "读树失败"
+  if [ -z "$pat" ]; then
+    out="$(nodes_tsv | awk -F'\t' '($1!=""||$2!=""){a=($6-$4)*($7-$5); if (($7-$5)<=2 || ($6-$4)<=2) a+=5000000; print a "\t" $0}' | sort -n | head -"$n")"
+  else
+    out="$(nodes_tsv | match_nodes "$pat" | sort -n | head -"$n")"
+  fi
+  [ -z "$out" ] && { say "（无匹配）"; return 1; }
+  printf '%s\n' "$out" | awk -F'\t' '{printf "%s|%s|%s|%s,%s-%s,%s|clk=%s|ed=%s\n",$2,$3,$4,$5,$6,$7,$8,$9,$10}'
+}
+
+cmd_find(){ # find 关键词 [N=5]（找不到自动滑屏）
+  local pat="$1" n="${2:-5}" line
+  ensure; fetch_tree || die "读树失败"
+  line="$(autosearch "$pat" 1 tap)"
+  [ -z "$line" ] && die "未找到（含自动滑屏）: $pat"
+  local out; out="$(nodes_tsv | match_nodes "$pat" | sort -n | head -"$n")"
+  if [ -n "$out" ]; then
+    printf '%s\n' "$out" | awk -F'\t' '{printf "%d) %s|%s|%s|%s,%s|clk=%s|ed=%s\n",NR,$2,$3,$4,$5,$6,$9,$10}'
+  else
+    say "✓ 找到「$(field "$line" 5)」@$(field "$line" 1),$(field "$line" 2)（当前屏）"
+  fi
+}
+
+cmd_tap(){ # tap 关键词[|序号] → 自动滑屏搜索 + 点击 + 回读
+  local pat="$1" idx=1
+  case "$pat" in *"|"*) idx="${pat##*|}"; pat="${pat%|*}";; esac
+  ensure; fetch_tree || die "读树失败"
+  local line; line="$(autosearch "$pat" "$idx" tap)"
+  [ -z "$line" ] && die "未找到（含自动滑屏）: $pat"
+  tap_line "$line"
+}
+
+cmd_type(){ # type 文字 [true|false=清空?]
+  local text="$1" clear="${2:-true}"
+  ensure
+  local pre; pre="$(G /phone_state 2>/dev/null | jq -r '.result' 2>/dev/null | jq -r '"edit=\(.isEditable) focus=[\(.focusedElement.text // .focusedElement.contentDescription // "")]"' 2>/dev/null)"
+  [ "${pre#*edit=true}" = "$pre" ] && say "! 当前焦点不是输入框，仍尝试输入"
+  toast "▸ 输入「$text」"
+  local r; r="$(P keyboard/input "base64_text=$(printf '%s' "$text" | base64 -w0)&clear=$clear")"
+  case "$r" in *'"error"'*) die "输入失败: $r";; esac
+  sleep 0.25
+  local post; post="$(G /phone_state 2>/dev/null | jq -r '.result' 2>/dev/null | jq -r '"edit=\(.isEditable) focus=[\(.focusedElement.text // "")]"' 2>/dev/null)"
+  say "✓ 输入完成 → $post"
+}
+
+cmd_typein(){ # typein 框关键词 文字 → 自动滑屏找框 + 点框 + 输入；框关键词给空串 = 屏幕上的输入框
+  local pat="$1" text="$2" line x y
+  ensure; fetch_tree || die "读树失败"
+  line="$(autosearch "$pat" 1 edit)"
+  if [ -z "$line" ] && [ -n "$pat" ]; then
+    say "（未匹配「$pat」输入框，改用屏幕上的输入框）"
+    line="$(autosearch "" 1 edit)"
+  fi
+  [ -z "$line" ] && die "屏幕上没有输入框: ${pat:-任意}"
+  x=$(( ($(field "$line" 1) + $(field "$line" 3)) / 2 ))
+  y=$(( ($(field "$line" 2) + $(field "$line" 4)) / 2 ))
+  toast "▸ 点输入框@$x,$y"
+  P tap "x=$x&y=$y" >/dev/null; sleep 0.2
+  cmd_type "$text"
+}
+
+cmd_key(){ # key back|home|enter|... | 数字 keycode
+  local k="$1"
+  case "$k" in
+    back) k=4;; home) k=3;; recents|app_switch) k=187;; menu) k=82;;
+    enter|search) k=66;; delete|backspace) k=67;; tab) k=61;; space) k=62;;
+    escape) k=111;; up) k=19;; down) k=20;; left) k=21;; right) k=22;;
+    center|ok) k=23;; power) k=26;; wake) k=224;;
+  esac
+  case "$k" in ''|*[!0-9]*) die "未知按键: $k";; esac
+  ensure; toast "▸ key $k"
+  P keyboard/key "key_code=$k" >/dev/null; sleep 0.25
+  say "✓ key $k → app=$(fg_app)"
+}
+
+cmd_swipe(){ ensure; P swipe "startX=$1&startY=$2&endX=$3&endY=$4&duration=${5:-300}" >/dev/null; toast "▸ swipe $1,$2→$3,$4"; say "✓ swipe $1,$2 → $3,$4"; }
+
+cmd_app(){ # app 包名 | 名称片段（自动搜已装包）——monkey 直拉前台 + 快速轮询
+  local q="$1"
+  local pkg="$q"
+  case "$q" in
+    *.*) : ;;
+    *) local cand n
+       cand="$(adb shell pm list packages 2>/dev/null | sed 's/^package://' | grep -i -- "$q")"
+       n="$(printf '%s\n' "$cand" | grep -c . || true)"
+       if [ "$n" -eq 1 ]; then pkg="$cand"; else
+         say "候选包名（$n）："; printf '%s\n' "$cand" | head -12
+         [ "$n" -eq 0 ] && die "未找到包: $q"; die "多个候选，请给更精确的片段或完整包名"
+       fi ;;
+  esac
+  ensure
+  local i capp=""
+  if adb_ok; then
+    adb shell monkey -p "$pkg" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+  fi
+  for i in $(seq 1 15); do
+    capp="$(st_pkg)"; [ "$capp" = "$pkg" ] && break; sleep 0.2
+  done
+  if [ "$capp" != "$pkg" ]; then
+    P app "package=$pkg" >/dev/null
+    for i in $(seq 1 10); do
+      capp="$(st_pkg)"; [ "$capp" = "$pkg" ] && break; sleep 0.2
+    done
+  fi
+  toast "▸ 启动 ${pkg##*.}"
+  if [ "$capp" = "$pkg" ]; then
+    say "✓ 启动 $pkg"
+  else
+    say "! 启动指令已发 $pkg，但前台=${capp:-未知}（Termux 悬浮窗可能抢占焦点）"
+  fi
+  cmd_now
+}
+
+cmd_stop(){ ensure; P app/stop "package=$1" >/dev/null; say "✓ 已停止 $1"; }
+cmd_link(){ ensure; local r; r="$(P app/deep-link "deepLink=$1")"; case "$r" in *'"error"'*) die "深链失败: $r";; esac; sleep 0.6; say "✓ 深链 $1"; cmd_now; }
+
+cmd_shot(){ # shot [路径]
+  local f="${1:-$CACHE/pq.png}"
+  if adb_ok && adb exec-out screencap -p > "$f.tmp" 2>/dev/null \
+     && [ "$(head -c4 "$f.tmp" | od -An -tx1 | tr -d ' \n')" = "89504e47" ]; then
+    mv "$f.tmp" "$f"
+  else
+    rm -f "$f.tmp"
+    G /screenshot > "$CACHE/st.json" 2>/dev/null
+    jq -er '.result' "$CACHE/st.json" 2>/dev/null | base64 -d > "$f" 2>/dev/null || die "截图失败"
+  fi
+  say "✓ shot → $f"
+}
+
+cmd_wait(){ # wait 关键词 [超时秒=0.5] → 快速轮询；前台被 Termux 抢占时立刻报错；不要大超时
+  local pat="$1" t="${2:-0.5}" i=0 line="" tk=0 lim
+  lim="$(awk "BEGIN{print int($t*10)}")"; [ "$lim" -lt 1 ] && lim=1
+  ensure
+  while [ "$i" -lt "$lim" ]; do
+    if fetch_tree 2>/dev/null; then
+      line="$(pick "$pat" 1 tap)"
+      [ -n "$line" ] && break
+      if [ "$(st_pkg)" = com.termux ]; then
+        tk=$((tk+1))
+        [ "$tk" -ge 3 ] && die "前台被 Termux 抢占（悬浮窗/误切）→ 把目标 App 切回前台或收起 Termux 后重试"
+      else tk=0; fi
+    fi
+    sleep 0.1; i=$((i+1))
+  done
+  [ -z "$line" ] && die "等待超时(${t}s): $pat"
+  say "✓ 出现「$(field "$line" 5)」@$(field "$line" 1),$(field "$line" 2)"
+}
+
+cmd_scrollto(){ # scrollto 关键词 [up|down=up] [最多=10]  up=手指上滑看下方内容
+  local pat="$1" dir="${2:-up}" max="${3:-10}" i=0 line=""
+  ensure
+  while [ "$i" -le "$max" ]; do
+    fetch_tree 2>/dev/null && line="$(pick "$pat" 1 tap)"
+    [ -n "$line" ] && { say "✓ 找到「$(field "$line" 5)」@$(field "$line" 1),$(field "$line" 2)（滚动 $i 次）"; return 0; }
+    case "$dir" in
+      up)   swipe_up ;;
+      down) swipe_down ;;
+      *) die "方向只能是 up/down";;
+    esac
+    toast "▸ 滚动($dir) $((i+1))/$max"
+    sleep 0.35; i=$((i+1))
+  done
+  die "滚动 ${max} 次仍未找到: $pat"
+}
+
+cmd_media(){ # media [state|play|pause|next|previous|stop]
+  local a="${1:-state}"
+  if [ "$a" = state ]; then
+    local dump; dump="$(adb shell dumpsys media_session 2>/dev/null)"
+    printf '%s\n' "$dump" | grep -E 'state=PlaybackState \{state=' | grep -v 'state=null' | head -4
+    printf '%s\n' "$dump" | grep -E 'metadata: size=' | grep -v 'description=null' | head -4
+    local st; st="$(printf '%s\n' "$dump" | grep -m1 -oE 'state=PlaybackState \{state=[A-Za-z]*\(?[0-9]+' | grep -oE '[0-9]+$')"
+    case "$st" in
+      3) say "（state=3 正在播放）";;
+      2) say "（state=2 已暂停）";;
+      "") say "（没有活跃的媒体会话）";;
+      *) say "（state=$st）";;
+    esac
+    return 0
+  fi
+  local out; out="$(adb shell cmd media_session dispatch "$a" 2>&1)"
+  case "$out" in
+    *rror*|*nknown*|*not*|"")
+      local kc=""; case "$a" in play|pause) kc=85;; next) kc=87;; previous) kc=88;; stop) kc=86;; esac
+      adb shell input keyevent "$kc" >/dev/null 2>&1
+      say "✓ media $a（用媒体键 $kc 兜底）" ;;
+    *) say "✓ media $a" ;;
+  esac
+  sleep 0.8
+  adb shell dumpsys media_session 2>/dev/null | grep -E 'state=PlaybackState \{state=' | grep -v 'state=null' | head -1 | sed 's/^/  /'
+}
+
+cmd_toast(){ toast "$1"; say "✓ toast: $1"; }
+
+cmd_step(){ # step "op:参数" ... 一条命令串完整流程；任何一步失败即停
+  local i=0 s op rest
+  for s in "$@"; do
+    i=$((i+1))
+    op="${s%%:*}"; rest="${s#*:}"; [ "$op" = "$s" ] && rest=""
+    say "[$i] $s"
+    case "$op" in
+      tap)      cmd_tap "$rest" || return 1 ;;
+      type)     cmd_type "$rest" || return 1 ;;
+      typein)   local f="${rest%%:*}"; cmd_typein "$f" "${rest#*:}" || return 1 ;;
+      key)      cmd_key "$rest" || return 1 ;;
+      app)      cmd_app "$rest" || return 1 ;;
+      stop)     cmd_stop "$rest" || return 1 ;;
+      link)     cmd_link "$rest" || return 1 ;;
+      wait)     cmd_wait "$rest" || return 1 ;;
+      scrollto) local p="${rest%%:*}"; local d="${rest#*:}"; [ "$d" = "$p" ] && d=up; cmd_scrollto "$p" "$d" || return 1 ;;
+      swipe)    cmd_swipe $rest || return 1 ;;
+      shot)     cmd_shot ${rest:+$rest} || return 1 ;;
+      media)    cmd_media "$rest" || return 1 ;;
+      toast)    toast "$rest" ;;
+      sleep)    sleep "$rest" ;;
+      *) die "未知步骤: $s" ;;
+    esac
+  done
+  say "✓ 全部完成（$i 步）"
+}
+
+cmd_help(){
+  cat <<'EOF'
+pq — 通用手机常用操作（适配所有 App，无 App 专属配置；找不到元素自动滑屏搜索）
+  pq now                        当前 App / 焦点输入框
+  pq ui [关键词] [N]            列元素 text|desc|class|坐标|clk|ed
+  pq find 关键词 [N]            候选列表（按面积排序，找不到自动滑屏）
+  pq tap 关键词[|序号]          点击（自动滑屏查找 + 回读验证）
+  pq type "文字" [false]        向焦点输入框输入（默认清空，false=追加）
+  pq typein 框关键词 "文字"     自动滑屏找框 → 点框 → 输入
+  pq wait 关键词 [秒=0.5]       快速确认元素是否出现（默认 0.5s，超了立刻换招）
+  pq scrollto 关键词 [up|down]  指定方向滚动查找（up=手指上滑看下方）
+  pq shot [路径]                截图（adb 优先）
+  pq app 包名|名称片段          启动 App
+  pq stop 包名 / pq link URL    停止 App / 打开深链
+  pq key back|home|enter|...    按键
+  pq swipe x1 y1 x2 y2 [ms]     滑动
+  pq media [state|play|pause|next|previous|stop]
+  pq toast 文字                 屏幕上打提示
+  pq recover                    修复 Portal 通道
+  pq step "app:…" "wait:…" "tap:…" "type:…" ...   一条命令跑完整流程
+环境: PQ_QUIET=1 关 toast；PQ_RE=1 正则匹配；PQ_AUTOSCROLL=0 关自动滑屏；PQ_MAX_SWIPES=N 滑动上限
+EOF
+}
+
+cmd="${1:-help}"; [ $# -gt 0 ] && shift || true
+case "$cmd" in
+  now|state) cmd_now ;;
+  ui)        cmd_ui "${1:-}" "${2:-40}" ;;
+  find)      [ $# -ge 1 ] || die "用法: pq find 关键词"; cmd_find "$1" "${2:-5}" ;;
+  tap)       [ $# -ge 1 ] || die "用法: pq tap 关键词"; cmd_tap "$1" ;;
+  type)      [ $# -ge 1 ] || die "用法: pq type 文字"; cmd_type "$1" "${2:-true}" ;;
+  typein)    [ $# -ge 2 ] || die "用法: pq typein 框关键词 文字"; cmd_typein "$1" "$2" ;;
+  key)       [ $# -ge 1 ] || die "用法: pq key 名称"; cmd_key "$1" ;;
+  back)      cmd_key back ;;
+  swipe)     [ $# -ge 4 ] || die "用法: pq swipe x1 y1 x2 y2 [ms]"; cmd_swipe "$1" "$2" "$3" "$4" "${5:-300}" ;;
+  app)       [ $# -ge 1 ] || die "用法: pq app 包名"; cmd_app "$1" ;;
+  stop)      [ $# -ge 1 ] || die "用法: pq stop 包名"; cmd_stop "$1" ;;
+  link)      [ $# -ge 1 ] || die "用法: pq link URL"; cmd_link "$1" ;;
+  shot)      cmd_shot "${1:-}" ;;
+  wait)      [ $# -ge 1 ] || die "用法: pq wait 关键词 [秒]"; cmd_wait "$1" "${2:-10}" ;;
+  scrollto)  [ $# -ge 1 ] || die "用法: pq scrollto 关键词 [up|down]"; cmd_scrollto "$1" "${2:-up}" "${3:-10}" ;;
+  media)     cmd_media "${1:-state}" ;;
+  toast)     [ $# -ge 1 ] || die "用法: pq toast 文字"; cmd_toast "$1" ;;
+  ping)      portal_up && say pong || { say "Portal 掉线，尝试恢复…"; recover && say "✓ 已恢复" || die "恢复失败"; } ;;
+  recover)   recover && say "✓ Portal 已恢复" || die "恢复失败" ;;
+  step)      [ $# -ge 1 ] || die "用法: pq step \"tap:xx\" \"type:xx\""; cmd_step "$@" ;;
+  help|-h|--help) cmd_help ;;
+  *) die "未知命令: $cmd（pq help 看用法）" ;;
+esac

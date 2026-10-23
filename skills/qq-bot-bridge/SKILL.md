@@ -21,6 +21,9 @@ description: "This phone runs an official Tencent QQ bot (AppID <QQ_APP_ID>, bot
 | `tools.qq.session_switch` | 切换会话 |
 | `tools.qq.session_delete` | **默认销毁该聊天全部会话 + 聊天记录**（也删 OpenCode 会话） |
 | `tools.qq.invite` | 拉群链接 |
+| `tools.qq.start` | 启动桥并等机器人上线（已在跑则不重复启动） |
+| `tools.qq.stop` | 停止桥；**默认延迟 5 秒**，让回复先发出去；`delay=0` 立即停 |
+| `tools.qq.restart` | 重启桥（改完配置/代码）；默认延迟 5 秒，`delay=0` 立即 |
 
 规则：
 
@@ -28,6 +31,7 @@ description: "This phone runs an official Tencent QQ bot (AppID <QQ_APP_ID>, bot
 - 用户要文件：生成完立刻 `send_file`，**不要贴图床链接**；发完说清「文件名 + 大小 + 用途」。
 - 切片文件按顺序发，提示对方全部收完后合并。
 - 发消息受 5 分钟被动窗口限制；失败会返回原因。
+- 启停别用 shell：`start` / `stop` / `restart` 已经做成工具，`stop`/`restart` 默认延迟 5 秒，避免这条回复发不出去。
 
 ## 用户侧命令（QQ 里发）
 
@@ -90,4 +94,8 @@ qq start | stop | restart
 | 权限 | 机器人需被私聊或拉进群；群消息需要 `group_openid` |
 | 本地文件 | `~/qqbot/history/`（聊天记录）、`bridge.log`、`bridge.lock` |
 | 限制 | 单文件约 7MB（私聊）/10MB（群）；被动回复窗口 5 分钟 |
+
+## 附带脚本
+
+本目录 `scripts/` 下是手册对应的命令行实现（已脱敏，Termux 路径改为 `$HOME`/`$PREFIX`，shebang 统一为 `/usr/bin/env`）。
 

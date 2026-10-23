@@ -1,0 +1,308 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""bili-im —— 用已登录的 B 站 Cookie 收发私信（不打开 App）。
+
+用法：
+  bili-im whoami                 当前账号
+  bili-im search <关键词>         按昵称找用户（返回 uid）
+  bili-im send <uid|昵称> <文本>  发私信（昵称会先搜索再发送）
+  bili-im read <uid|昵称> [n]    读最近 n 条消息（默认 10）
+  bili-im sessions               列出最近会话
+
+选项：
+  --json    机器可读输出
+  昵称支持 @前缀，如 @AnAjwwk
+
+限制：对方未关注、未回复前，每个会话最多只能发 1 条。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import sys
+import time
+import urllib.parse
+import urllib.request
+
+COOKIE_FILE = os.path.expanduser("~/.cache/opencode/bili/cookies.txt")
+UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
+MIXIN_TAB = [
+    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+    33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40,
+    61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11,
+    36, 20, 34, 44, 52,
+]
+
+
+class BiliError(RuntimeError):
+    pass
+
+
+def load_cookies(path: str = COOKIE_FILE) -> dict:
+    if not os.path.exists(path):
+        raise BiliError(f"没有找到 B 站 Cookie：{path}（先在 bilibili-web 技能里登录）")
+    jar = {}
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if line.startswith("#") or not line.strip():
+                continue
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) >= 7:
+                jar[parts[5]] = parts[6]
+    if "SESSDATA" not in jar:
+        raise BiliError("Cookie 里没有 SESSDATA，登录已失效")
+    return jar
+
+
+class Bili:
+    def __init__(self) -> None:
+        self.cookies = load_cookies()
+        self.csrf = self.cookies.get("bili_jct", "")
+        self.uid = int(self.cookies.get("DedeUserID", "0"))
+        self._mixin: str | None = None
+
+    # ---------- 底层 HTTP ----------
+    def _headers(self, extra: dict | None = None) -> dict:
+        h = {
+            "User-Agent": UA,
+            "Referer": "https://message.bilibili.com/",
+            "Cookie": "; ".join(f"{k}={v}" for k, v in self.cookies.items()),
+            "Accept": "application/json, text/plain, */*",
+        }
+        if extra:
+            h.update(extra)
+        return h
+
+    def _open(self, req: urllib.request.Request) -> dict:
+        try:
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:  # type: ignore[attr-defined]
+            raise BiliError(f"HTTP {exc.code}") from exc
+
+    def get(self, url: str, params: dict | None = None) -> dict:
+        if params:
+            url += "?" + urllib.parse.urlencode(params)
+        return self._open(urllib.request.Request(url, headers=self._headers()))
+
+    def post(self, url: str, params: dict, form: dict) -> dict:
+        if params:
+            url += "?" + urllib.parse.urlencode(params)
+        data = urllib.parse.urlencode(form).encode()
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers=self._headers(
+                {
+                    "Origin": "https://message.bilibili.com",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                }
+            ),
+        )
+        return self._open(req)
+
+    # ---------- WBI 签名 ----------
+    @property
+    def mixin(self) -> str:
+        if self._mixin:
+            return self._mixin
+        nav = self.get("https://api.bilibili.com/x/web-interface/nav")
+        try:
+            wbi = nav["data"]["wbi_img"]
+        except KeyError as exc:
+            raise BiliError(f"获取 WBI 密钥失败：{nav.get('message')}") from exc
+        img = wbi["img_url"].rsplit("/", 1)[-1].split(".")[0]
+        sub = wbi["sub_url"].rsplit("/", 1)[-1].split(".")[0]
+        raw = img + sub
+        self._mixin = "".join(raw[i] for i in MIXIN_TAB)
+        return self._mixin
+
+    def sign(self, params: dict) -> dict:
+        params = dict(params)
+        params["wts"] = int(time.time())
+        items = sorted(params.items())
+        query = urllib.parse.urlencode(
+            [(k, "".join(c for c in str(v) if c not in "!'()*")) for k, v in items]
+        )
+        params["w_rid"] = hashlib.md5((query + self.mixin).encode()).hexdigest()
+        return params
+
+    # ---------- 业务 ----------
+    def whoami(self) -> dict:
+        nav = self.get("https://api.bilibili.com/x/web-interface/nav")
+        d = nav.get("data", {})
+        return {
+            "uid": d.get("mid") or self.uid,
+            "uname": d.get("uname"),
+            "level": (d.get("level_info") or {}).get("current_level"),
+            "logged_in": bool(d.get("isLogin")),
+        }
+
+    def search_user(self, keyword: str) -> list[dict]:
+        kw = keyword.lstrip("@")
+        r = self.get(
+            "https://api.bilibili.com/x/web-interface/search/type",
+            {"search_type": "bili_user", "keyword": kw, "page": 1},
+        )
+        if r.get("code") != 0:
+            raise BiliError(f"搜索失败：{r.get('message')}")
+        out = []
+        for u in r.get("data", {}).get("result") or []:
+            out.append(
+                {
+                    "uid": u.get("mid"),
+                    "uname": u.get("uname"),
+                    "fans": u.get("fans"),
+                    "sign": (u.get("usign") or "").replace("\n", " ")[:50],
+                }
+            )
+        return out
+
+    def resolve(self, target: str) -> tuple[int, str]:
+        if target.isdigit():
+            return int(target), target
+        hits = self.search_user(target)
+        if not hits:
+            raise BiliError(f"搜不到用户：{target}")
+        exact = [h for h in hits if h["uname"].lower() == target.lstrip("@").lower()]
+        pick = (exact or hits)[0]
+        return int(pick["uid"]), pick["uname"]
+
+    def send(self, receiver: int, text: str) -> dict:
+        dev_id = "A6716E9A-7CE3-47AF-994B-F0B34178D28D"
+        form = {
+            "msg[sender_uid]": self.uid,
+            "msg[receiver_id]": receiver,
+            "msg[receiver_type]": 1,
+            "msg[msg_type]": 1,
+            "msg[msg_status]": 0,
+            "msg[content]": json.dumps({"content": text}, ensure_ascii=False),
+            "msg[dev_id]": dev_id,
+            "msg[new_face_version]": 0,
+            "msg[timestamp]": int(time.time()),
+            "from_filework": 0,
+            "build": 0,
+            "mobi_app": "web",
+            "csrf": self.csrf,
+            "csrf_token": self.csrf,
+        }
+        params = self.sign({"w_sender_uid": self.uid, "w_receiver_id": receiver})
+        r = self.post(
+            "https://api.vc.bilibili.com/web_im/v1/web_im/send_msg", params, form
+        )
+        if r.get("code") != 0:
+            raise BiliError(f"发送失败：{r.get('message')}（code {r.get('code')}）")
+        return r.get("data") or {}
+
+    def read(self, talker: int, size: int = 10) -> list[dict]:
+        r = self.get(
+            "https://api.vc.bilibili.com/svr_sync/v1/svr_sync/fetch_session_msgs",
+            {
+                "talker_id": talker,
+                "session_type": 1,
+                "size": size,
+                "build": 0,
+                "mobi_app": "web",
+                "csrf": self.csrf,
+            },
+        )
+        if r.get("code") != 0:
+            raise BiliError(f"读取失败：{r.get('message')}")
+        msgs = r.get("data", {}).get("messages") or []
+        out = []
+        for m in msgs:
+            raw = m.get("content") or ""
+            try:
+                body = json.loads(raw)
+                text = body.get("content") if isinstance(body, dict) else str(body)
+            except Exception:
+                text = raw
+            out.append(
+                {
+                    "from": m.get("sender_uid"),
+                    "ts": m.get("timestamp"),
+                    "text": text,
+                }
+            )
+        return out
+
+    def sessions(self) -> list[dict]:
+        r = self.get(
+            "https://api.vc.bilibili.com/session_svr/v1/session_svr/get_sessions",
+            {"session_type": 1, "group_id": 0, "count": 20, "csrf": self.csrf},
+        )
+        if r.get("code") != 0:
+            raise BiliError(f"读取会话失败：{r.get('message')}")
+        return [
+            {
+                "talker": s.get("talker_id"),
+                "unread": s.get("unread_count"),
+                "last": (s.get("last_msg") or {}).get("content", "")[:60],
+            }
+            for s in r.get("data", {}).get("session_list") or []
+        ]
+
+
+def main(argv: list[str]) -> int:
+    args = [a for a in argv if a != "--json"]
+    as_json = "--json" in argv
+    if not args or args[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0
+
+    b = Bili()
+    cmd = args[0]
+
+    try:
+        if cmd == "whoami":
+            print(json.dumps(b.whoami(), ensure_ascii=False, indent=1) if as_json else
+                  f"{b.whoami()['uname']} (uid {b.whoami()['uid']})")
+
+        elif cmd == "search":
+            hits = b.search_user(args[1])
+            if as_json:
+                print(json.dumps(hits, ensure_ascii=False, indent=1))
+            else:
+                for h in hits:
+                    print(f"{h['uid']}\t{h['uname']}\t粉丝 {h['fans']}\t{h['sign']}")
+
+        elif cmd == "send":
+            if len(args) < 3:
+                raise BiliError('用法：bili-im send <uid|昵称> "文本"')
+            uid, name = b.resolve(args[1])
+            b.send(uid, args[2])
+            print(f"已发送给 {name} (uid {uid})：{args[2]}")
+
+        elif cmd == "read":
+            uid, name = b.resolve(args[1])
+            n = int(args[2]) if len(args) > 2 else 10
+            msgs = b.read(uid, n)
+            if as_json:
+                print(json.dumps(msgs, ensure_ascii=False, indent=1))
+            else:
+                for m in msgs:
+                    who = "我" if m["from"] == b.uid else name
+                    print(f"{who}: {m['text']}")
+
+        elif cmd == "sessions":
+            ss = b.sessions()
+            if as_json:
+                print(json.dumps(ss, ensure_ascii=False, indent=1))
+            else:
+                for s in ss:
+                    print(f"{s['talker']}\t未读 {s['unread']}\t{s['last']}")
+        else:
+            raise BiliError(f"未知命令：{cmd}")
+    except BiliError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -82,3 +82,7 @@ gopeed add "https://..." --path "/storage/emulated/0/Download/Gopeed"
 | 网络 | 下载任务本身需要外网 |
 | 可选 | 开了「接口令牌」时，通过 `GOPEED_TOKEN` 或 `~/.config/gopeed/token` 提供 |
 
+## 附带脚本
+
+本目录 `scripts/` 下是手册对应的命令行实现（已脱敏，Termux 路径改为 `$HOME`/`$PREFIX`，shebang 统一为 `/usr/bin/env`）。
+
