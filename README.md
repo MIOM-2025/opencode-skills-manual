@@ -1,12 +1,16 @@
 # OpenCode 技能使用手册
 
-一套在 **Android + Termux + OpenCode** 环境下运行的技能手册合集，覆盖手机控制、B 站、GitHub、下载器、离线转写、QQ 机器人和 NapCat 等场景。
+一套在 **Android + Termux + OpenCode** 环境下运行的技能手册合集，覆盖手机控制、B 站、GitHub、下载器、离线转写和 QQ 机器人等场景。
 
 - 每个技能目录下有 `SKILL.md`：技能声明、使用说明、示例
 - 多数技能附带可直接运行的 `scripts/`（已脱敏）
 - 每份手册末尾有 **「环境要求」**，列出运行时、系统命令、语言包、模型、权限、网络和凭证
 - 完整依赖清单见 **[ENVIRONMENT.md](ENVIRONMENT.md)**
 - 文中账号、IP、AppID 等私人信息已替换为 `your-account` / `<phone-ip>` / `<QQ_APP_ID>` 等占位符
+
+## 变更记录
+
+- **2026-10-23**：移除 NapCat（小号 QQ）技能。原因：NapCat 属于第三方协议端，**容易触发 QQ 风控**，可能导致小号被限制甚至封禁。官方 QQ 机器人（`qq-bot-bridge`）不依赖 NapCat，仍是推荐方式。
 
 ## 技能索引
 
@@ -19,7 +23,6 @@
 | `github` | GitHub：搜索、文件、Issue/PR、fork/star/clone、建仓库、发文件 | [SKILL.md](skills/github/SKILL.md) · [scripts](skills/github/scripts) |
 | `gopeed` | 手机 Gopeed 下载器：新建/暂停/继续/删除任务 | [SKILL.md](skills/gopeed/SKILL.md) · [scripts](skills/gopeed/scripts) |
 | `media-transcribe` | 离线转写：sherpa-onnx + Paraformer | [SKILL.md](skills/media-transcribe/SKILL.md) · [scripts](skills/media-transcribe/scripts) |
-| `napcat` | NapCat 小号 QQ：扫码/密码登录、OneBot11、WebUI | [SKILL.md](skills/napcat/SKILL.md) |
 | `phone-back` | Android 返回键 | [SKILL.md](skills/phone-back/SKILL.md) |
 | `phone-home` | Android 主界面键 | [SKILL.md](skills/phone-home/SKILL.md) |
 | `phone-recents` | Android 多任务键 | [SKILL.md](skills/phone-recents/SKILL.md) |
@@ -39,7 +42,6 @@
 | `github` | Bun 插件、`gh` 2.40+、`git`、`jq` |
 | `gopeed` | Gopeed 1.9+ API、`curl`、`jq` |
 | `media-transcribe` | Python 3.10+、`sherpa-onnx`、`ffmpeg`、80MB 模型 |
-| `napcat` | proot Ubuntu、LinuxQQ、NapCat、VNC |
 | `phone-back` | OpenCode 插件、Portal 或 adb |
 | `phone-home` | OpenCode 插件、Portal 或 adb |
 | `phone-recents` | OpenCode 插件、Portal 或 adb |
@@ -53,7 +55,7 @@
 - **系统**：Android（Termux）或 Linux；路径统一用 `$HOME`、`$PREFIX`
 - **终端工具**：`bash`、`curl`、`jq`、`git`
 - **OpenCode**：2.x，技能目录 `~/.config/opencode/skills/`，插件目录 `~/.config/opencode/plugins/`
-- **按需安装**：`nodejs`、`python`、`ffmpeg`、`gh`、`proot-distro`，见 ENVIRONMENT.md
+- **按需安装**：`nodejs`、`python`、`ffmpeg`、`gh`，见 ENVIRONMENT.md
 
 ## 目录结构
 
