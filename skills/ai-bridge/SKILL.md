@@ -8,6 +8,19 @@ description: "Step-by-step operation manual for the local `ai` multi-model CLI a
 > 一句话：`ai` 是这台手机上的多模型桥；模型只回文本，不会动手机、不会改文件。你是执行者，它只是顾问。
 > 完整参考：`~/AI_MANUAL.md`；设计说明：`~/AI_BRIDGE.md`。
 
+## 工具优先（不用开终端）
+
+| 工具 | 用途 | 对应命令 |
+| --- | --- | --- |
+| `ai.models` | 列出模型别名 | `ai models` |
+| `ai.ask` | 单轮提问 / 复用会话 | `ai ask [--sys] [--session] <别名> "问题"` |
+| `ai.ping` | 连通性检查（会真调一次） | `ai ping <别名>` |
+| `ai.relay` | 两个模型互聊 | `ai relay A B "话题" 轮数` |
+
+- `ai.ask` 必填 `model`、`prompt`；多轮把上一轮的 `session` 带上。
+- 工具直接返回纯文本，不用再解析 stdout / 重定向 stderr。
+- 只有工具没覆盖的命令（`ai chat`、`ai img`、`ai svg`、`ai oc-models`）才用命令行。
+
 ## 0. 核心工作法：一步一调用
 
 1. **选模型**：默认 `ds`；中文润色 `glm`；快速短问 `lightning`/`mimo`；重推理 `nemotron`；长文 `longcat`；视觉 `vl`。
@@ -215,6 +228,7 @@ phone_dump_ui 看 → phone_tap/type/key 做 → 结果自带 auto UI 快照 →
 | 项目 | 要求 |
 | --- | --- |
 | 运行时 | `ai` CLI（bash 脚本，需在 PATH 中） |
+| 工具封装 | OpenCode 插件 `cli-bridge`：`ai.models` / `ai.ask` / `ai.ping` / `ai.relay` |
 | 系统命令 | `curl`、`jq` |
 | 配置文件 | `~/.config/ai/providers.conf`（格式：别名\|类型\|base_url\|模型\|密钥环境变量） |
 | 模型服务 | 本机 OpenCode 服务或任意 OpenAI 兼容端点；`ai oc-models` 需要 OpenCode 服务在运行 |

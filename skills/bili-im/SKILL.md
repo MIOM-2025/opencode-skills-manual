@@ -9,7 +9,19 @@ description: "用已登录的 B 站 Cookie 直接收发私信，不打开 App、
 
 **不要现写 curl / python 调 B 站 IM 接口**，直接用它。
 
-## 用法
+## 工具优先
+
+| 工具 | 用途 |
+| --- | --- |
+| `bili_im.status` | 当前登录账号 |
+| `bili_im.search` | 按昵称找人，返回 uid |
+| `bili_im.send` | 发私信；`confirm=false` 只预览，`confirm=true` 才发 |
+| `bili_im.read` | 读最近私信，可指定条数 |
+| `bili_im.sessions` | 最近会话列表 |
+
+`send` 默认只预览。先确认收件人和文本，再带 `confirm: true` 调用。
+
+## 用法（命令行备用）
 
 ```bash
 bili-im whoami                          # 当前登录账号
@@ -50,6 +62,7 @@ bili-im sessions                        # 最近会话列表
 | 项目 | 要求 |
 | --- | --- |
 | 运行时 | Python 3.9+（只用标准库，无第三方包） |
+| 工具封装 | OpenCode 插件 `cli-bridge`：`bili_im.status` / `search` / `send` / `read` / `sessions` |
 | 网络 | 可访问 `api.bilibili.com`、`api.vc.bilibili.com` |
 | 凭证 | `~/.cache/opencode/bili/cookies.txt`（与 `bilibili-web` 共用，需含 `bili_jct`） |
 | 限制 | 对方未关注/未回复前，每个会话只能发 1 条私信 |

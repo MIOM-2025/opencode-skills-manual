@@ -8,6 +8,21 @@ description: Generic phone quick ops (pq) — current app, UI tree, find/tap/typ
 **没有任何 App 专属配置**：不写死包名、坐标、资源 id。一律「看屏幕上的字 → 点它 → 回读验证」。
 命令入口是 `pq`（装在本机 PATH，源码在 `skills/phone-ops/scripts/pq`）。
 
+## 工具优先（不用开终端）
+
+| 工具 | 用途 |
+| --- | --- |
+| `pq.now` | 当前 App / 包名 / 焦点输入框 |
+| `pq.find` | 按文字找控件，返回候选与坐标（自动滑屏） |
+| `pq.tap` | 按文字点击（支持 `文字|2` 选候选） |
+| `pq.type` / `pq.type_in` | 输入到焦点框 / 找到指定框再输入 |
+| `pq.wait` / `pq.scrollto` | 等元素出现 / 定向滚动查找 |
+| `pq.shot` | 截图，返回本地路径 |
+| `pq.app` / `pq.key` / `pq.swipe` / `pq.media` | 启动 App、按键、滑动、媒体控制 |
+| `pq.step` | 一条调用跑多步（`app:…`、`tap:…`、`type:…`） |
+
+工具没覆盖的 `stop`、`link`、`toast`、`recover`、`ui` 全量元素表，再用下面的 `pq` 命令。
+
 ## 为什么用它
 
 - **一条命令 = 一步完整操作**（含自动回读验证），比「dump → 找坐标 → 点 → 再 dump」四次往返快一个量级。
@@ -65,6 +80,7 @@ pq step "scrollto:关于手机" "tap:关于手机" "wait:版本号" "shot"
 | 项目 | 要求 |
 | --- | --- |
 | 运行时 | `pq`（bash 脚本，需在 PATH 中） |
+| 工具封装 | OpenCode 插件 `cli-bridge`：`pq.now` / `find` / `tap` / `type` / `type_in` / `wait` / `scrollto` / `shot` / `app` / `key` / `swipe` / `media` / `step` |
 | 系统命令 | `curl`、`jq`、`adb`（兜底），可选 `termux-toast` |
 | 通道 | Portal `http://127.0.0.1:8080`，token 读 `~/portal/token`；失败自动切 adb |
 | 权限 | Portal 无障碍服务，或 USB/无线调试 |

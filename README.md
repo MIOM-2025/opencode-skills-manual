@@ -10,6 +10,7 @@
 
 ## 变更记录
 
+- **2026-10-24**：把常用命令行封装成工具：`ai.*`（问模型/列模型/探活/双模型对聊）、`bili_im.*`（B 站私信）、`pq.*`（按屏幕文字操作手机）。文档改为工具优先，命令行保留作备用。
 - **2026-10-24**：新增 `bili-replies`（查自己评论下的新回复并逐条回复）和 `feiyu-persona`（大肥鱼口吻）；两者都不含自动轮询或自动回复。
 - **2026-10-23**：移除 NapCat（小号 QQ）技能。原因：NapCat 属于第三方协议端，**容易触发 QQ 风控**，可能导致小号被限制甚至封禁。官方 QQ 机器人（`qq-bot-bridge`）不依赖 NapCat，仍是推荐方式。
 
@@ -17,7 +18,7 @@
 
 | 技能 | 用途 | 文档 |
 | --- | --- | --- |
-| `ai-bridge` | 本地多模型 CLI：咨询、多轮会话、模型对聊/辩论 | [SKILL.md](skills/ai-bridge/SKILL.md) |
+| `ai-bridge` | 本地多模型桥：咨询、多轮会话、模型对聊/辩论 | [SKILL.md](skills/ai-bridge/SKILL.md) |
 | `bilibili-web` | B 站网页/API：登录、视频、评论、动态、搜索、收藏、三连、弹幕 | [SKILL.md](skills/bilibili-web/SKILL.md) · [scripts](skills/bilibili-web/scripts) |
 | `bili-im` | B 站私信：按昵称找人、发私信、读会话 | [SKILL.md](skills/bili-im/SKILL.md) · [scripts](skills/bili-im/scripts) |
 | `bili-replies` | B 站评论区回声：查自己评论下的新回复并逐条回复 | [SKILL.md](skills/bili-replies/SKILL.md) |
@@ -38,9 +39,9 @@
 
 | 技能 | 关键依赖 |
 | --- | --- |
-| `ai-bridge` | bash、`curl`、`jq`、`~/.config/ai/providers.conf` |
+| `ai-bridge` | `ai.*` 工具或 `ai` CLI、bash、`curl`、`jq`、`~/.config/ai/providers.conf` |
 | `bilibili-web` | Node 24+，无 npm 依赖；B 站 cookie |
-| `bili-im` | Python 3.9+（标准库）；B 站 cookie |
+| `bili-im` | `bili_im.*` 工具或 `bili-im` CLI；Python 3.9+；B 站 cookie |
 | `bili-replies` | Node 24+，共用 B 站 cookie |
 | `feiyu-persona` | 无依赖，纯提示词 |
 | `browser` | Node 24+，无 npm 依赖 |
@@ -51,7 +52,7 @@
 | `phone-home` | OpenCode 插件、Portal 或 adb |
 | `phone-recents` | OpenCode 插件、Portal 或 adb |
 | `phone-control` | `adb`、Portal `127.0.0.1:8080` |
-| `phone-ops` | `pq`、`curl`、`jq`、`adb` |
+| `phone-ops` | `pq.*` 工具或 `pq` CLI、`curl`、`jq`、`adb` |
 | `qq-bot-bridge` | Python 3、`aiohttp`、`PyYAML`、`opencode` CLI |
 | `video-watch` | `ffmpeg`、`bili.*`、`media.*` |
 

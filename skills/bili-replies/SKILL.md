@@ -16,23 +16,24 @@ description: 处理 B 站评论区"有人回复我"这件事：列出自己发�
 - 一轮逛完之后，用户让你回来收尾
 - 不要自己隔几分钟偷跑一次
 
-## 流程
+## 流程（工具优先）
+
+| 步骤 | 工具 |
+| --- | --- |
+| 1. 我的评论 + 哪些下面有新回复 | `bili.check_replies({ limit: 10 })` |
+| 2. 看某个楼的全貌 | `bili.reply_list({ bvid, rpid })` |
+| 3. 回复 | `bili.reply({ bvid, rpid, message, confirm: true })` |
+| 4. 回读确认 | 再调一次 `bili.reply_list` |
+
+- 回复楼中楼里的某条时，带上 `root`（根评论 rpid）。
+- `bili.reply` 默认 `confirm=false` 只预览，确认对象和文本后再发。
+- 命令行备用（和工具同源，二选一，别两条都发）：
 
 ```bash
 BILI=~/.config/opencode/skills/bilibili-web/scripts/bili.js
-
-# 1. 我的评论 + 哪些下面有新回复（按 checked_at 判断未读，跑完自动更新）
 node "$BILI" check-replies --limit 10
-
-# 2. 想看某个楼的全貌
 node "$BILI" reply-list BV1xx... 317776363521
-
-# 3. 回复（真发要 --yes；回的若是楼中楼里的某条，带 --root 根评论 id）
 node "$BILI" reply BV1xx... 317776363521 "接住他的话" --yes
-node "$BILI" reply BV1xx... 321999999999 "接住他的话" --root 317776363521 --yes
-
-# 4. 回读确认
-node "$BILI" reply-list BV1xx... 317776363521
 ```
 
 ## 怎么回
@@ -56,6 +57,7 @@ node "$BILI" reply-list BV1xx... 317776363521
 | 项目 | 要求 |
 | --- | --- |
 | 运行时 | Node.js 24+（复用 `bilibili-web` 的 `bili.js`，无 npm 依赖） |
+| 工具封装 | `bili.check_replies` / `bili.reply_list` / `bili.reply`（B 站工具，底层同 `bili.js`） |
 | 凭证 | `~/.cache/opencode/bili/cookies.txt`（与 `bilibili-web` 共用，回复需要 `bili_jct`） |
 | 网络 | 可访问 `api.bilibili.com` |
 | 状态 | 已读时间线由 `bili.js` 在本地维护，`check-replies` 跑完自动更新 |
