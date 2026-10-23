@@ -84,5 +84,5 @@ gopeed add "https://..." --path "/storage/emulated/0/Download/Gopeed"
 
 ## 附带脚本
 
-本目录 `scripts/` 下是手册对应的命令行实现（已脱敏，Termux 路径改为 `$HOME`/`$PREFIX`，shebang 统一为 `/usr/bin/env`）。
+本目录 `scripts/` 下是手册对应的命令行实现（已脱敏，Termux 路径改为 `$HOME`/`$PREFIX`，shebang 统一为 `/usr/bin/env`）。`gopeed` 需要 Gopeed App 的本地 API 已启动。
 

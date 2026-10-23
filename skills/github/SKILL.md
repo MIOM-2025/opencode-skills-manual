@@ -130,5 +130,5 @@ ghlogin           # 设备授权；完成后自动配置 git 凭据 + token
 
 ## 附带脚本
 
-本目录 `scripts/` 下是手册对应的命令行实现（已脱敏，Termux 路径改为 `$HOME`/`$PREFIX`，shebang 统一为 `/usr/bin/env`）。
+本目录 `scripts/` 下是手册对应的命令行实现（已脱敏，Termux 路径改为 `$HOME`/`$PREFIX`，shebang 统一为 `/usr/bin/env`）。`login.sh` 即 `ghlogin`（设备码登录），`ghs` 是 `gh api` 的命令行封装。
 

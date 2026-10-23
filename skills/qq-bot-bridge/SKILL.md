@@ -97,5 +97,5 @@ qq start | stop | restart
 
 ## 附带脚本
 
-本目录 `scripts/` 下是手册对应的命令行实现（已脱敏，Termux 路径改为 `$HOME`/`$PREFIX`，shebang 统一为 `/usr/bin/env`）。
+本目录 `scripts/` 下是手册对应的命令行实现（已脱敏，Termux 路径改为 `$HOME`/`$PREFIX`，shebang 统一为 `/usr/bin/env`）。注意：`qq` 只是 CLI 前端，桥主程序在 `~/qqbot/bridge.py`（未包含在本仓库）。
 
