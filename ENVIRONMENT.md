@@ -61,7 +61,7 @@ pip install sherpa-onnx aiohttp pyyaml
 
 ```
 ~/.config/opencode/skills/     技能与脚本
-~/.config/opencode/plugins/    插件（github、gopeed、web-tools 等）
+~/.config/opencode/plugins/    插件（github、gopeed、web-tools、cli-bridge 等）
 ~/.cache/opencode/             缓存：bili cookies、asr 模型、browser 响应、pq 树
 ~/repos/                       github.clone 默认目录
 ~/qqbot/                       QQ 桥主程序、配置、历史

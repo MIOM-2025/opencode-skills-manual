@@ -7,6 +7,18 @@ description: "Send download URLs to the Gopeed app on this Android phone through
 
 > 一句话：把链接 POST 给本机 Gopeed，让 Gopeed 用它的多线程引擎下载；不要用 `curl`/`wget` 自己下。
 
+## 工具优先（不用开终端）
+
+| 工具 | 用途 |
+| --- | --- |
+| `gopeed.status` | API 是否在线、版本、任务概览 |
+| `gopeed.add` | 新建下载，支持 HTTP/HTTPS、magnet、torrent，可带 `name` / `path` |
+| `gopeed.task` | 单个任务详情（进度、速度、状态） |
+| `gopeed.pause` / `gopeed.resume` | 暂停 / 继续 |
+| `gopeed.delete` | 删除任务；`force=true` 连已下载文件一起删 |
+
+命令行 `gopeed ...` 保留作备用；`wait`（阻塞等完成）和按状态过滤的 `list` 没有对应工具，需要时再用。
+
 ## 快速命令
 
 入口在 PATH：`gopeed`（源码：`~/.config/opencode/skills/gopeed/scripts/gopeed`）。
@@ -77,6 +89,7 @@ gopeed add "https://..." --path "/storage/emulated/0/Download/Gopeed"
 | 项目 | 要求 |
 | --- | --- |
 | 运行时 | Android 版 Gopeed（1.9+），在「设置 → 高级 → API」启动服务，监听 `127.0.0.1:9999` |
+| 工具封装 | OpenCode 插件 `gopeed`：`status` / `add` / `task` / `pause` / `resume` / `delete` |
 | 系统命令 | `curl`、`jq` |
 | 权限 | 允许 Gopeed 后台运行、关闭电池优化，否则 API 会被系统冻结 |
 | 网络 | 下载任务本身需要外网 |

@@ -46,7 +46,7 @@
 | `feiyu-persona` | 无依赖，纯提示词 |
 | `browser` | Node 24+，无 npm 依赖 |
 | `github` | Bun 插件、`gh` 2.40+、`git`、`jq` |
-| `gopeed` | Gopeed 1.9+ API、`curl`、`jq` |
+| `gopeed` | `gopeed.*` 工具或 `gopeed` CLI、Gopeed 1.9+ API、`curl`、`jq` |
 | `media-transcribe` | Python 3.10+、`sherpa-onnx`、`ffmpeg`、80MB 模型 |
 | `phone-back` | OpenCode 插件、Portal 或 adb |
 | `phone-home` | OpenCode 插件、Portal 或 adb |
