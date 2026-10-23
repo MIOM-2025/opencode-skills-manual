@@ -27,14 +27,7 @@ description: 处理 B 站评论区"有人回复我"这件事：列出自己发�
 
 - 回复楼中楼里的某条时，带上 `root`（根评论 rpid）。
 - `bili.reply` 默认 `confirm=false` 只预览，确认对象和文本后再发。
-- 命令行备用（和工具同源，二选一，别两条都发）：
-
-```bash
-BILI=~/.config/opencode/skills/bilibili-web/scripts/bili.js
-node "$BILI" check-replies --limit 10
-node "$BILI" reply-list BV1xx... 317776363521
-node "$BILI" reply BV1xx... 317776363521 "接住他的话" --yes
-```
+命令行 `bili.js` 与工具同源，工具不可用时再用；二选一，别两条都发。
 
 ## 怎么回
 

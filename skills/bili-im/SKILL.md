@@ -21,17 +21,7 @@ description: "用已登录的 B 站 Cookie 直接收发私信，不打开 App、
 
 `send` 默认只预览。先确认收件人和文本，再带 `confirm: true` 调用。
 
-## 用法（命令行备用）
-
-```bash
-bili-im whoami                          # 当前登录账号
-bili-im search 关键词                    # 按昵称找人，返回 uid
-bili-im send <uid|昵称> "文本"           # 发私信（昵称会先搜索）
-bili-im read <uid|昵称> [条数]           # 读最近消息
-bili-im sessions                        # 最近会话列表
-```
-
-加 `--json` 输出机器可读结果。
+命令行 `bili-im` 仍在 PATH，工具不可用时再用；`--json` 输出机器可读结果。
 
 ## 关键限制
 
