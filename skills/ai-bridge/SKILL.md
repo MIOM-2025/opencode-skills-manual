@@ -25,29 +25,23 @@ description: "Step-by-step operation manual for the local `ai` multi-model CLI a
 
 1. **选模型**：默认 `ds`；中文润色 `glm`；快速短问 `lightning`/`mimo`；重推理 `nemotron`；长文 `longcat`；视觉 `vl`。
 2. **问一个自包含的问题**：`ask` 是无状态新会话，模型看不到你这边的对话、文件、手机屏幕，背景必须写进问题。
-3. **读 stdout**：成功时 stdout 就是纯文本回复；stderr 可能带会话 ID 或 `✖` 错误。
+3. **读返回文本**：成功时就是纯文本回复；失败会直接报错，不会假装成功。
 4. **判断后再行动**：需要执行就回到你自己的工具（文件/手机），不要让模型“直接做”。
 
 不要一口气批量问五个模型。只有重要结论才交叉验证，而且逐个读、逐个判断；循环只用于快速投票，不代替决策。
 
 ## 1. 最短上手
 
-```bash
-ai models                          # 看已配置别名
-ai ask ds "用一句话解释量子纠缠"      # 单轮问答，stdout 纯文本
-ai ask glm "把这段改成书面语：今天天气不错"
-ai ping mimo                       # 连通性检查（会真的调用一次模型）
+```text
+ai.models()
+ai.ask({ model: "ds", prompt: "用一句话解释量子纠缠" })
+ai.ask({ model: "glm", prompt: "把这段改成书面语：今天天气不错" })
+ai.ping({ model: "mimo" })
 ```
 
-成功时可直接捕获：
+工具直接返回文本；`ai.ask` 第一次会带回 session，下一轮原样传入即可。CLI 只在工具不可用时看第 2 节。
 
-```bash
-R=$(timeout 90 ai ask ds "给这个变量起个英文名：用户下单时间戳" 2>~/.cache/ai.err)
-printf '%s\n' "$R"
-cat ~/.cache/ai.err    # 里面通常有本会话 SID；出错时是 ✖ 信息
-```
-
-## 2. 命令表
+## 2. 命令表（CLI 参考；能用 `ai.*` 工具时不要用命令）
 
 | 命令 | 作用 | 备注 |
 |---|---|---|
@@ -64,8 +58,8 @@ cat ~/.cache/ai.err    # 里面通常有本会话 SID；出错时是 ✖ 信息
 
 ## 3. 单轮：当顾问用
 
-```bash
-ai ask ds "你是独立审阅者。背景：……。方案：……。请指出 3 个最可能的问题，按严重程度排序，不要客套。"
+```text
+ai.ask({ model: "ds", prompt: "你是独立审阅者。背景：……。方案：……。请指出 3 个最可能的问题，按严重程度排序，不要客套。" })
 ```
 
 规则：
@@ -76,26 +70,19 @@ ai ask ds "你是独立审阅者。背景：……。方案：……。请指出
 
 ## 4. 多轮对话（AI 对话）
 
-### 4.1 Agent 用：`--session`
+### 4.1 Agent 用：工具 session
 
-`ai ask` 第一次调用会创建会话，并把 SID 打到 **stderr**。把 SID 存下来，后续带上：
+`ai.ask` 第一次调用会在返回文本末尾带回 `会话：ses_xxx`。下一轮把它原样填进 `session`：
 
-```bash
-# 第 1 轮：新会话，stderr 落到文件
-ai ask ds "背景：我在给手机做自动化。问题：第一步应该先确认什么？" 2>~/.cache/ai.sid
+```text
+ai.ask({ model: "ds", prompt: "背景：我在给手机做自动化。第一步先确认什么？" })
+→ ……\n\n会话：ses_xxx
 
-# 取出 SID（最后一行，形如 ses_xxx）
-SID=$(tail -n 1 ~/.cache/ai.sid)
-printf '%s\n' "$SID"
-
-# 第 2 轮：同一会话，模型记得上一轮
-ai ask -s "$SID" ds "继续：如果 Portal 离线，复活顺序怎么排？"
-
-# 第 3 轮：仍然同一会话
-ai ask -s "$SID" ds "把上面的结论压成 3 条执行清单。"
+ai.ask({ model: "ds", session: "ses_xxx", prompt: "继续：Portal 离线时复活顺序怎么排？" })
+ai.ask({ model: "ds", session: "ses_xxx", prompt: "把结论压成 3 条执行清单。" })
 ```
 
-跨工具调用时，SID 放文件里（例如 `~/.cache/ai/<任务名>.sid`），下一步读出来再传。
+会话 ID 记在任务笔记里即可，不需要写临时文件。
 
 ### 4.2 人类用：`ai chat`
 
@@ -107,12 +94,12 @@ ai chat glm
 # /exit   退出
 ```
 
-`chat` 是交互式 `read` 循环，agent 在非 TTY 工具里直接调用会立即 EOF 或卡住；agent 一律用 `--session`。
+`chat` 是交互式 `read` 循环，agent 在非 TTY 工具里直接调用会立即 EOF 或卡住；agent 一律用 `ai.ask` + `session`。
 
 ### 4.3 双 AI 对话：`ai relay`
 
-```bash
-ai relay ds glm "给手机自动化设计 3 条使用守则" 4 | tee ~/debate.md
+```text
+ai.relay({ model_a: "ds", model_b: "glm", topic: "给手机自动化设计 3 条使用守则", rounds: 4 })
 ```
 
 - A/B 交替发言，默认 3 轮；`relay` 自己把历史拼进每一轮，不需要 `--session`。
@@ -147,34 +134,34 @@ ai relay ds glm "给手机自动化设计 3 条使用守则" 4 | tee ~/debate.md
 
 **第二意见**
 
-```bash
-ai ask nemotron "你是独立审阅者。背景：……。我的方案：……。请只指出最可能出错的 3 个点，按严重程度排序，并给一句修正建议。"
+```text
+ai.ask({ model: "nemotron", prompt: "你是独立审阅者。背景：……。我的方案：……。请只指出最可能出错的 3 个点，按严重程度排序，并给一句修正建议。" })
 ```
 
 **中文润色**
 
-```bash
-ai ask glm "把下面文字改成简洁、书面、没有 AI 味的中文；保留事实，不要增加内容：……"
+```text
+ai.ask({ model: "glm", prompt: "把下面文字改成简洁、书面、没有 AI 味的中文；保留事实，不要增加内容：……" })
 ```
 
 **代码审查**
 
-```bash
-ai ask ds "你是资深工程师。只审查下面的改动，按“必须修 / 建议 / 可不改”分类，指出具体行和原因：……"
+```text
+ai.ask({ model: "ds", prompt: "你是资深工程师。只审查下面的改动，按“必须修 / 建议 / 可不改”分类，指出具体行和原因：……" })
 ```
 
 **交叉验证（重要结论才做）**
 
-```bash
-ai ask ds "……"
-ai ask glm "……"
-# 读完两个回复，自己对比；不要只信一个
+```text
+ai.ask({ model: "ds", prompt: "……" })
+ai.ask({ model: "glm", prompt: "……" })
+// 读完两个回复，自己对比；不要只信一个
 ```
 
 **双 AI 辩论**
 
-```bash
-ai relay ds nemotron "手机自动化应该默认走 Portal 还是 adb？" 4
+```text
+ai.relay({ model_a: "ds", model_b: "nemotron", topic: "手机自动化应该默认走 Portal 还是 adb？", rounds: 4 })
 ```
 
 ## 7. 失败判断（重要）
@@ -190,7 +177,7 @@ ai relay ds nemotron "手机自动化应该默认走 Portal 还是 adb？" 4
 | `（超时未拿到回复）` | stdout | 免费队列慢；换 `lightning`/`mimo`，或加大外层 `timeout` |
 | 退出码 0 但输出是上面某条 | stdout | 仍算失败；不要当正常回复 |
 
-外层超时建议 `timeout 90` 或 `timeout 120`；`ai` 内部轮询约 60 秒，外层给太紧会提前杀掉。
+工具用 `timeout_seconds`（默认 180）；CLI 外层用 `timeout 90` / `timeout 120`，给太紧会提前杀掉。
 
 ## 8. 已知限制（2026-10）
 

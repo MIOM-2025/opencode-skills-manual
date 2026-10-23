@@ -40,14 +40,14 @@
 | 技能 | 关键依赖 |
 | --- | --- |
 | `ai-bridge` | `ai.*` 工具或 `ai` CLI、bash、`curl`、`jq`、`~/.config/ai/providers.conf` |
-| `bilibili-web` | Node 24+，无 npm 依赖；B 站 cookie |
+| `bilibili-web` | `bili.*` 工具或 `bili.js`；Node 24+；B 站 cookie |
 | `bili-im` | `bili_im.*` 工具或 `bili-im` CLI；Python 3.9+；B 站 cookie |
 | `bili-replies` | Node 24+，共用 B 站 cookie |
 | `feiyu-persona` | 无依赖，纯提示词 |
-| `browser` | Node 24+，无 npm 依赖 |
+| `browser` | `web.fetch` 工具或 `fetch.js` / `curl`；Node 24+ |
 | `github` | Bun 插件、`gh` 2.40+、`git`、`jq` |
 | `gopeed` | `gopeed.*` 工具或 `gopeed` CLI、Gopeed 1.9+ API、`curl`、`jq` |
-| `media-transcribe` | Python 3.10+、`sherpa-onnx`、`ffmpeg`、80MB 模型 |
+| `media-transcribe` | `media.transcribe` 工具；Python 3.10+、`sherpa-onnx`、`ffmpeg`、80MB 模型 |
 | `phone-back` | OpenCode 插件、Portal 或 adb |
 | `phone-home` | OpenCode 插件、Portal 或 adb |
 | `phone-recents` | OpenCode 插件、Portal 或 adb |

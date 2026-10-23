@@ -8,167 +8,87 @@ description: Operate Bilibili through its website/API without opening the phone 
 专用于 **B 站网页接口**，不启动手机浏览器，也不启动 `tv.danmaku.bili` App。  
 需要 App 界面操作时，用 `phone-ops`；本 skill 只负责 HTTP/API。
 
-OpenCode 里的首选入口是插件工具 `bili.*`（见 `plugins/web-tools`），例如
-`bili.home`、`bili.folders`、`bili.dynamic`、`bili.comment`、`bili.triple`、`bili.danmaku`。
-下面的 CLI 是同一引擎的备用入口，方便调试和在没有工具注册的环境里使用。
+## 工具优先
 
-入口：
+表里有的场景直接调工具，不要再写 `node` 命令；下面的 CLI 是同一引擎的备用入口。
 
-```bash
-BILI=~/.config/opencode/skills/bilibili-web/scripts/bili.js
-node "$BILI" --help
-```
+| 场景 | 工具 |
+| --- | --- |
+| 登录 / 轮询 / 账号状态 | `bili.login` / `bili.poll` / `bili.status` |
+| 首页推荐 / 搜索 / 视频详情 | `bili.home` / `bili.search` / `bili.video` |
+| 字幕 / 最新投稿 | `bili.subtitles` / `bili.latest` |
+| 一级评论 / 发评论 / 删评论 | `bili.comments` / `bili.comment` / `bili.delete_comment` |
+| 楼中楼 / 回复 | `bili.reply_list` / `bili.reply` |
+| 扫自己的新回复 | `bili.check_replies` |
+| 收藏夹 | `bili.folders` / `bili.folder_items` / `bili.create_folder` / `bili.favorite` / `bili.ai_favorite` |
+| 点赞 / 投币 / 关注 / 三连 | `bili.like` / `bili.coin` / `bili.follow` / `bili.triple` |
+| 弹幕 | `bili.danmaku` / `bili.delete_danmaku` |
+| 动态 | `bili.dynamic` |
 
-依赖：Node 24+、`curl` 可选。只使用 Node 内置模块，不装 npm 包。
+写操作工具都要 `confirm: true` 才真正执行；不传只预览。
+
+备用 CLI：`~/.config/opencode/skills/bilibili-web/scripts/bili.js`（`node bili.js --help` 看全部子命令）。依赖 Node 24+，只用内置模块，不装 npm 包。
 
 ## 登录
 
-B 站扫码登录需要一个由用户本人确认的官方链接：
+调 `bili.login` 生成官方扫码链接，把 `loginUrl` 原样发给用户确认；然后 `bili.poll` 检查状态，成功后 cookie 自动保存。已登录时 `bili.login` 会直接返回账号，换号传 `force: true`。
 
-```bash
-node "$BILI" login          # 已登录时会直接返回账号；要重新登录加 --force
-```
-
-把输出的 `loginUrl` 原样发给用户，让其在手机上点开并确认。然后：
-
-```bash
-node "$BILI" wait           # 轮询最多 180 秒，成功会自动保存 cookie
-# 或手动单次检查：
-node "$BILI" poll
-```
-
-会话保存在：
-
-```text
-~/.cache/opencode/bili/cookies.txt
-```
-
-- cookie 文件权限为 `600`，**不要把 cookie / SESSDATA / bili_jct 输出到聊天**。
-- 登录链接是账号授权凭证，不要转发、不要写入公开仓库。
-- 链接过期（`86038`）后重新 `login --force`。
-- 扫码状态看 `data.code`，不是顶层 `code`：
-  - `86101` 未扫码
-  - `86090` 已扫码，等待确认
-  - `0` 成功
-  - `86038` 过期
-
-检查当前会话：
-
-```bash
-node "$BILI" nav
-```
+- 扫码状态看 `data.code`：`86101` 未扫码、`86090` 已扫码待确认、`0` 成功、`86038` 过期。
+- 会话在 `~/.cache/opencode/bili/cookies.txt`（600）。不要把 cookie / SESSDATA / bili_jct 发到聊天或写进公开仓库。
+- 检查账号：`bili.status`。
 
 ## 浏览与读取
 
-```bash
-# 当前账号最近投稿（默认 5 条）
-node "$BILI" latest
-node "$BILI" latest 10
+| 要什么 | 工具 |
+| --- | --- |
+| 最新投稿 | `bili.latest({ limit: 10 })` |
+| 视频详情 | `bili.video({ bvid })` |
+| 一级评论 | `bili.comments({ bvid })` |
+| CC / AI 字幕 | `bili.subtitles({ bvid, page? })` |
+| 搜索 | `bili.search({ keyword })` |
+| 首页推荐 | `bili.home({ limit? })` |
+| 收藏夹列表 / 内容 | `bili.folders()` / `bili.folder_items({ folder?, folder_id?, page?, limit? })` |
 
-# 视频详情：标题、UP、aid、简介、播放/评论/点赞数据
-node "$BILI" video BV1JJJU6pEiY
-
-# 最新一级评论
-node "$BILI" comments BV1JJJU6pEiY
-
-# 视频 CC 字幕/逐句时间轴（有字幕轨时）
-node "$BILI" subtitles BV1JJJU6pEiY
-node "$BILI" subtitles BV1JJJU6pEiY --page 2
-# 注意：很多视频只有 AI 字幕（ai-zh），可能识别错或与视频不匹配；
-# 输出会带 aiGenerated / duration / note，异常时会丢弃不可靠字幕轨。
-# 没有字幕时用 Whisper 转写音频，或抽帧给视觉模型。
-
-# 搜索视频
-node "$BILI" search "FNF 移植"
-
-# 首页推荐（默认 10 条，最多 30 条）
-node "$BILI" home
-node "$BILI" home 20
-
-# 当前账号的收藏夹
-node "$BILI" folders
-
-# 查看某个收藏夹里的视频（按 ID 或名称）
-node "$BILI" folder-items 4250678585
-node "$BILI" folder-items --folder "AI收藏夹"
-```
-
-输出都是 JSON，可直接接 `jq`。B 站接口可能限流（`-799`）；等待后再试，不要短时间连续重试。
+字幕注意：很多视频只有 AI 字幕（`ai-zh`），可能识别错；输出带 `aiGenerated` / `duration` / `note`，不可靠时会丢弃。没有字幕就用 `media.transcribe` 转写音轨。
 
 ## 收藏夹
 
-新建收藏夹、收藏视频都需要 `--yes`。`--privacy 0` 是公开，`--privacy 1` 是私密；不传时默认公开。
-
-```bash
-# 新建（默认公开）
-node "$BILI" create-folder "待看" --yes
-node "$BILI" create-folder "私人收藏" --privacy 1 --yes
-
-# 收藏到指定收藏夹（按名称或 ID）
-node "$BILI" favorite BV1JJJU6pEiY --folder "待看" --yes
-node "$BILI" favorite BV1JJJU6pEiY --folder-id 3136197585 --yes
-
-# 不指定收藏夹时，使用/自动创建私密的“AI收藏夹”
-node "$BILI" ai-favorite BV1JJJU6pEiY --yes
-```
-
-`AI收藏夹` 是给 AI 做价值筛选用的私密收藏夹，不会公开出现在主页。  
-`ai-favorite` 只在它不存在时创建；已存在就直接复用。也可以用 `favorite` 显式传入收藏夹，
-但不会自动新建不存在的普通收藏夹（先 `create-folder`）。
-
-AI 收藏的筛选原则：只放与用户当前项目/明确兴趣直接相关、且可能之后会复用的内容；
-不要批量抓取首页，不要因为“热门”就收藏；一次 1–3 条，并在回复里说明为什么选它。
+- 新建：`bili.create_folder({ title, privacy: 0|1, confirm: true })`
+- 收藏：`bili.favorite({ bvid, folder?, folder_id?, confirm: true })`
+- AI 私密收藏夹：`bili.ai_favorite({ bvid, confirm: true })`，不存在时自动创建
+- `AI收藏夹` 不公开；只放与当前项目/明确兴趣直接相关、之后可能复用的内容，一次 1–3 条，并说明为什么选它。
 
 ## 写操作（必须确认）
 
-点赞、投币、关注、收藏、发弹幕和评论都会以当前账号产生真实互动；除特别说明外都要求 `--yes`。
-除非用户已经明确给出目标并说“执行”，否则先 dry-run，不要加 `--yes`。
+点赞、投币、关注、收藏、弹幕、评论都会以当前账号产生真实互动。工具必须 `confirm: true` 才发布，不传只预览。用户没明确说“执行”时先 dry-run。
 
-```bash
-# 点赞 / 取消点赞
-node "$BILI" like BV1JJJU6pEiY --yes
-node "$BILI" like BV1JJJU6pEiY --undo --yes
+| 操作 | 工具 |
+| --- | --- |
+| 点赞 / 取消 | `bili.like({ bvid, undo?, confirm: true })` |
+| 投币 | `bili.coin({ bvid, count: 1|2, confirm: true })` |
+| 关注 / 取关 | `bili.follow({ target, undo?, confirm: true })` |
+| 一键三连 | `bili.triple({ bvid, count: 1|2, confirm: true })` |
+| 发弹幕 / 删除 | `bili.danmaku({ bvid, message, progress?, page?, confirm: true })` / `bili.delete_danmaku({ dmid, confirm: true })` |
+| 评论 / 删除 | `bili.comment({ bvid, message, timestamp_seconds?, confirm: true })` / `bili.delete_comment({ bvid, rpid, confirm: true })` |
+| 楼中楼 / 回复 | `bili.reply_list({ bvid, rpid, page? })` / `bili.reply({ bvid, rpid, message, root?, confirm: true })` |
+| 扫自己的新回复 | `bili.check_replies({ limit: 10 })` |
+| 动态 | `bili.dynamic({ content?, images?, confirm: true })` |
 
-# 投币 1 或 2 枚（消耗账号硬币）
-node "$BILI" coin BV1JJJU6pEiY --count 1 --yes
-
-# 关注 / 取关，目标可以是视频 BV 或用户 MID
-node "$BILI" follow BV1JJJU6pEiY --yes
-node "$BILI" follow 3537124622076685 --undo --yes
-
-# 一键三连：点赞 + 投币 + 收藏到 AI收藏夹
-node "$BILI" triple BV1JJJU6pEiY --count 1 --yes
-
-# 发弹幕（时间点单位毫秒，默认 1000；分 P 默认 1）
-node "$BILI" danmaku BV1JJJU6pEiY "弹幕内容" --progress 1000 --page 1 --yes
-
-# 删除自己发出的弹幕（需要发送响应里的 dmid）
-node "$BILI" delete-danmaku 1234567890 --yes
-
-# 评论 / 删除评论
-# 评论里写 00:05 这样的时间点，B 站会自动渲染成可点击的跳转时间点。
-node "$BILI" comment BV1JJJU6pEiY "00:05 这里的双人同屏和 SICK 连击..." --yes
-node "$BILI" delete-comment BV1JJJU6pEiY 317776363521 --yes
-
-# 动态：纯文本或本地图片（最多 9 张）；不传 --yes 只 dry-run
-node "$BILI" dynamic "动态正文" --yes
-node "$BILI" dynamic "动态正文" --images /path/a.jpg,/path/b.png --yes
-```
-
-对应的 OpenCode 工具：
-
-```text
-bili.dynamic({ content, images: ["/path/a.jpg"], confirm: true })
-bili.comment({ bvid, message, timestamp_seconds: 5, confirm: true })
-```
-
-`bili.comment` 的 `timestamp_seconds` 会自动在开头生成 `MM:SS`；如果正文已经以
-`MM:SS` 开头则不会重复添加。动态图片接口与视频上传是两条独立链路，动态图片不会
-自动变成视频封面。
+评论里写 `00:05` 这样的时间点会自动渲染成可点击跳转；`bili.comment` 的 `timestamp_seconds` 也会在开头生成 `MM:SS`，正文已以时间点开头时不会重复。
 
 写操作依赖 cookie 中的 `bili_jct` 作为 CSRF token；缺失时重新登录。  
 一键三连如果中途失败，会返回已完成的部分；不要自动重试投币，先检查结果。
 发布评论后应回读 `comments` 验证 `rpid` 和文本，不要仅凭一次 POST 响应就断言成功。
+
+## 命令行兜底（没有对应工具）
+
+```bash
+BILI=~/.config/opencode/skills/bilibili-web/scripts/bili.js
+# 只下音轨，给本地 ASR 用（工具不提供音频下载）
+node "$BILI" audio BV1xx... --out /path/to/a.m4a
+# 自己发过的评论列表（工具只提供 check-replies）
+node "$BILI" my-comments 20
+```
 
 ## 技术要点
 
@@ -192,6 +112,8 @@ bili.comment({ bvid, message, timestamp_seconds: 5, confirm: true })
   - 关注/取关：`POST api.bilibili.com/x/relation/modify`
   - 发弹幕：`POST api.bilibili.com/x/v2/dm/post`
   - 删除弹幕：`POST api.bilibili.com/x/v2/dm/retract`
+- 楼中楼列表：`GET api.bilibili.com/x/v2/reply/reply?type=1&oid=<aid>&root=<rpid>`
+- 回复评论：`POST api.bilibili.com/x/v2/reply/add`（带 `root` 根评论 + `parent` 被回复的 rpid）
 - 请求需要 `Referer`（视频页/空间页）和桌面 UA；评论/互动 POST 需要 `Content-Type: application/x-www-form-urlencoded` 与 `csrf`。
 - 不要用手机浏览器打开页面；需要看视频内容时，先下载/抽帧/转写，或走视频理解模型。
 - 当前环境已安装 `ffmpeg`、`ffprobe`、`yt-dlp`；本地音频转写优先用 `media.transcribe`
@@ -201,7 +123,7 @@ bili.comment({ bvid, message, timestamp_seconds: 5, confirm: true })
 
 | 现象 | 处理 |
 |---|---|
-| `NOT_LOGGED_IN` / `-101` | `bili login --force`，让用户重新确认 |
+| `NOT_LOGGED_IN` / `-101` | `bili.login({ force: true })`，让用户重新确认 |
 | `-352` / 风控 | 检查 UA、Referer、WBI 参数；放慢频率 |
 | `-799` 请求过于频繁 | 停止重试，等待几分钟 |
 | `86038` | 登录链接过期，重新生成 |
@@ -213,6 +135,7 @@ bili.comment({ bvid, message, timestamp_seconds: 5, confirm: true })
 | 项目 | 要求 |
 | --- | --- |
 | 运行时 | Node.js 24+（只使用内置模块，无需 npm 依赖） |
+| 工具封装 | OpenCode 插件 `web-tools`：`bili.*`（登录、浏览、评论、互动、动态、弹幕） |
 | 系统命令 | `curl`（可选，调试用） |
 | 网络 | 可访问 `api.bilibili.com`、`bilibili.com`、`i0.hdslb.com` |
 | 凭证 | `~/.cache/opencode/bili/cookies.txt`，扫码登录后自动生成 |

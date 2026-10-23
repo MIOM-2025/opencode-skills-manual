@@ -37,37 +37,23 @@ description: Generic phone quick ops (pq) — current app, UI tree, find/tap/typ
 4. **失败立刻报+立刻换**：一条命令失败就说明原因并给替代动作，继续下一步；绝不把同一条命令重复发两遍。
 5. 节奏目标：看到屏幕 → 发命令 → 看回读 → 下一步，一轮 1~2 秒内完成。
 
-## 速查表
+## 命令行兜底（工具未覆盖时）
+
+工具表覆盖的操作不要再发命令。只剩这些没封装：
 
 ```bash
-pq now                        # 当前 App / 包名 / 键盘 / 焦点输入框内容
-pq ui [关键词] [N]            # 元素表：text|desc|class|坐标|clk(可点)|ed(可输入)
-pq find 关键词 [N]            # 候选列表（按面积排序；找不到自动滑屏搜索）
-pq tap 关键词[|序号]          # 点最佳匹配（找不到自动滑屏）+ 自动回读
-pq type "文字" [false]        # 输入到焦点框（默认先清空；false=追加）
-pq typein 框关键词 "文字"     # 自动滑屏找输入框 → 点框 → 输入
-pq wait 关键词 [秒=0.5]       快速确认元素是否出现（默认 0.5s；没出现立刻换招）
-pq scrollto 关键词 [up|down]  # 指定方向滚动查找（up=手指上滑看下方；自带多次滑动+轮询）
-pq shot [路径]                # 截图，默认 ~/.cache/pq/pq.png（可 read 查看）
-pq app 包名|名称片段          # 启动；给片段会自动搜已装包（唯一才启动）
-pq stop 包名 / pq link URL    # 停止 / 深链
-pq key back|home|enter|...    # 按键（也接受数字 keycode）
-pq swipe x1 y1 x2 y2 [ms]     # 滑动
-pq media [state|play|pause|next|previous|stop]   # 媒体会话（全 App 通用）
-pq toast 文字                 # 屏幕打提示（执行留痕）
-pq recover                    # 手动修复 Portal
+pq stop 包名          # 停止 App
+pq link URL           # 打开深链
+pq toast 文字         # 屏幕提示
+pq recover            # 修复 Portal
+pq ui [关键词] [N]    # 全量元素表（工具只给 find 候选）
 ```
 
-`pq step` 一条命令跑完整流程（任何一步失败立即停）：
-
-```bash
-pq step "app:com.android.settings" "wait:设置" "tap:搜索" "type:蓝牙" "key:enter"
-pq step "scrollto:关于手机" "tap:关于手机" "wait:版本号" "shot"
-```
+多步流程用 `pq.step({ steps: ["app:…", "wait:…", "tap:…", "type:…"] })`。
 
 ## 使用铁律
 
-1. **对任意 App 都是同一套循环**：`now/ui` 看 → `tap/type/key` 做 → 命令回显里的「回读行」验证。树里看不到就 `pq shot` 截图看一眼再继续。
+1. **对任意 App 都是同一套循环**：`pq.now` / `pq.find` 看 → `pq.tap` / `pq.type` / `pq.key` 做 → 用返回的界面快照验证。树里看不到就 `pq.shot` 截图看一眼再继续。
 2. **找不到就自动滑屏**：`find/tap/typein` 目标不在屏幕上时会自动向上滑、再向下滑找（滑到内容不再变化=到头，双向到头才放弃）。`scrollto` 可指定方向手动控制。`PQ_AUTOSCROLL=0` 关闭，`PQ_MAX_SWIPES=N`（默认 10）控制上限。
 3. **定位靠屏幕上真实文字**（text 或 desc 均参与匹配），中文直接写；默认纯文本忽略大小写，`PQ_RE=1` 才当正则。
 4. **tap 的自动防呆**：优先「可点 且 非输入框」的最小元素；点到不可点元素时会改点它最近的可点祖先（列表行/卡片整行点得准）；不会把要发的句子点进草稿框。序号 `|2` 挑第 2 候选。

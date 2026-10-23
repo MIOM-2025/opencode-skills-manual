@@ -10,88 +10,45 @@ B 站专用流程用 `bilibili-web`；这里只放通用方法。
 
 ## 先用哪个
 
-1. **简单公开页面**：优先 `webfetch`，直接拿 Markdown。
-2. **需要桌面/手机 UA、cookie、重定向、POST、JSON**：用本 skill 的 `fetch.js` 或 `curl`。
-3. **强 JavaScript / 登录态复杂的页面**：找站点 API；没有 API 再考虑无头浏览器。当前环境没有安装 Playwright/Chromium，`fetch.js` 不执行 JS。
+1. **公开页面、JSON、带 cookie 的 GET**：优先 `web.fetch`，支持桌面/手机 UA、cookie 文件、原始响应。
+2. **只要 Markdown 正文**：用内置 `webfetch`。
+3. **需要 POST、表单、自定义请求头**：`web.fetch` 只做 GET，这时才用本 skill 的 `fetch.js` 或 `curl`。
+4. **强 JavaScript / 登录态复杂的页面**：找站点 API；没有 API 再考虑无头浏览器。当前环境没有安装 Playwright/Chromium，`fetch.js` 不执行 JS。
 
-入口：
+## 读取（工具）
 
-```bash
-FETCH=~/.config/opencode/skills/browser/scripts/fetch.js
-node "$FETCH" --help
+```text
+web.fetch({ url: "https://example.com" })                        // 桌面 Chrome UA
+web.fetch({ url: "https://example.com", mobile: true })          // 手机 Chrome UA
+web.fetch({ url: "https://example.com/private", cookie_file: "~/.cache/opencode/browser/cookies.txt" })
+web.fetch({ url: "https://api.example.com/items", raw: true })   // 原始 JSON
 ```
 
-依赖：Node 24+。只使用内置模块。
+`max_chars` 控制正文预览长度；`raw: true` 直接给原始响应体。需要把响应存成文件时，再用 `fetch.js --out`。
 
-## 快速读取
+备用 CLI：`~/.config/opencode/skills/browser/scripts/fetch.js`（`node fetch.js --help`）。依赖 Node 24+，只用内置模块。
 
-```bash
-# 默认 Windows Chrome 桌面 UA
-node "$FETCH" https://example.com
+## curl 配方（POST / 自定义头，工具不支持时）
 
-# 手机 UA
-node "$FETCH" https://example.com --mobile
-
-# 带 cookie（Netscape 格式或每行 name=value）
-node "$FETCH" https://example.com/private --cookie ~/.cache/opencode/browser/cookies.txt
-
-# 保存原始响应；JSON 输出里会有 title/description/text/links
-node "$FETCH" https://www.bilibili.com --out ~/.cache/opencode/browser/home.html
-```
-
-输出结构：
-
-```json
-{
-  "requestedUrl": "...",
-  "finalUrl": "...",
-  "status": 200,
-  "contentType": "text/html; charset=utf-8",
-  "title": "...",
-  "description": "...",
-  "text": "正文预览（默认 12000 字）",
-  "links": [{"text": "...", "url": "..."}],
-  "savedTo": "$HOME/.cache/opencode/browser/last-response.bin"
-}
-```
-
-用 `jq` 截取：
-
-```bash
-node "$FETCH" https://example.com | jq -r '.title, .text[:2000]'
-```
-
-## curl 配方
-
-桌面 UA：
+`web.fetch` 只做 GET；下面这些场景才用 curl：
 
 ```bash
 UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-curl -sSL -A "$UA" -H 'Accept-Language: zh-CN,zh;q=0.9' \
-  -c cookies.txt -b cookies.txt 'https://example.com' -o page.html
-```
 
-JSON API：
+# 普通 GET（工具能做的不要用这条）
+curl -sSL -A "$UA" -H 'Accept-Language: zh-CN,zh;q=0.9' -c cookies.txt -b cookies.txt 'https://example.com' -o page.html
 
-```bash
-curl -sS -A "$UA" -H 'Accept: application/json' \
-  -b cookies.txt 'https://api.example.com/items' | jq .
-```
+# JSON API
+curl -sS -A "$UA" -H 'Accept: application/json' -b cookies.txt 'https://api.example.com/items' | jq .
 
-表单 POST（需要登录态时）：
-
-```bash
-curl -sS -A "$UA" -b cookies.txt \
-  -H 'Referer: https://example.com/' \
-  -H 'Origin: https://example.com' \
-  --data-urlencode 'key=value' \
-  --data-urlencode 'csrf=...' \
-  'https://example.com/api/action' | jq .
+# 表单 POST（需要登录态）
+curl -sS -A "$UA" -b cookies.txt -H 'Referer: https://example.com/' -H 'Origin: https://example.com' \
+  --data-urlencode 'key=value' --data-urlencode 'csrf=...' 'https://example.com/api/action' | jq .
 ```
 
 - `-L` 跟随重定向，`-c/-b` 读写 cookie。
-- 有些接口必须带 `Referer` 和 `Origin`，否则会 403 或风控。
-- 不要从页面里抓 `csrf` 后盲目提交；先确认这是公开写操作，并得到用户确认。
+- 有些接口必须带 `Referer` 和 `Origin`，否则 403 或风控。
+- 不要从页面抓 `csrf` 后盲目提交；先确认是公开写操作，并得到用户确认。
 
 ## 浏览器模拟选择
 
@@ -128,6 +85,7 @@ curl -sS -A "$UA" -b cookies.txt \
 | 项目 | 要求 |
 | --- | --- |
 | 运行时 | Node.js 24+（只使用内置模块） |
+| 工具封装 | OpenCode 插件 `web-tools`：`web.fetch`（GET，支持 UA / cookie / raw） |
 | 网络 | 能访问目标站点 |
 | 输出目录 | `~/.cache/opencode/browser/`（响应体缓存） |
 | 注意 | 不执行 JavaScript，需要 JS 的页面请用真实浏览器 |

@@ -41,6 +41,18 @@ media.transcribe({
 ~/.config/opencode/skills/media-transcribe/scripts/transcribe_sherpa.py
 ```
 
+## B 站视频的音轨
+
+`media.frames` 下的 mp4 只有视频流，直接转写会报 “Output file does not contain any stream”。
+先用 bilibili-web 的脚本拿音轨（这一步没有对应工具，只能用 CLI）：
+
+```bash
+BILI=~/.config/opencode/skills/bilibili-web/scripts/bili.js
+node "$BILI" audio BV1xx... --out $PREFIX/tmp/opencode/a.m4a
+```
+
+再 `media.transcribe({ input: "/.../a.m4a" })`。309 秒音频约 16 秒转完。
+
 ## 处理策略
 
 1. 优先读取 B 站 AI/CC 字幕。
@@ -60,6 +72,7 @@ media.transcribe({
 | 项目 | 要求 |
 | --- | --- |
 | 运行时 | Python 3.10+ |
+| 工具封装 | `media.transcribe` / `media.frames` |
 | Python 包 | `sherpa-onnx`（离线推理） |
 | 系统命令 | `ffmpeg`、`ffprobe`（抽音频、转 16k 单声道） |
 | 模型 | `sherpa-onnx-paraformer-zh-small-2024-03-09`，约 80MB |
