@@ -20,6 +20,7 @@ description: Operate Bilibili through its website/API without opening the phone 
 | 一级评论 / 发评论 / 删评论 | `bili.comments` / `bili.comment` / `bili.delete_comment` |
 | 楼中楼 / 回复 | `bili.reply_list` / `bili.reply` |
 | 扫自己的新回复 | `bili.check_replies` |
+| 判重（看过/评论/跳过） | `bili.seen_check` / `bili.seen_add` |
 | 收藏夹 | `bili.folders` / `bili.folder_items` / `bili.create_folder` / `bili.favorite` / `bili.ai_favorite` |
 | 点赞 / 投币 / 关注 / 三连 | `bili.like` / `bili.coin` / `bili.follow` / `bili.triple` |
 | 弹幕 | `bili.danmaku` / `bili.delete_danmaku` |
@@ -86,8 +87,14 @@ description: Operate Bilibili through its website/API without opening the phone 
 BILI=~/.config/opencode/skills/bilibili-web/scripts/bili.js
 # 只下音轨，给本地 ASR 用（工具不提供音频下载）
 node "$BILI" audio BV1xx... --out /path/to/a.m4a
-# 自己发过的评论列表（工具只提供 check-replies）
+# 自己发过的评论列表
 node "$BILI" my-comments 20
+
+# 判重表 seen.md：看过/评论过哪些视频，避免重复刷、重复评论
+#（工具有 seen_check / seen_add，评论成功后也会自动写）
+node "$BILI" seen 50
+node "$BILI" seen-check BV1xx...
+node "$BILI" seen-add BV1xx... --title "标题" --status 评论 --rpid 317776363521
 ```
 
 ## 技术要点

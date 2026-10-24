@@ -78,6 +78,7 @@ pip install sherpa-onnx aiohttp pyyaml
 | 下载文件 | Gopeed App + `curl` + `jq` |
 | 转写音视频 | `ffmpeg` + Python + `sherpa-onnx` + 模型 |
 | 操作手机 App | Portal（或 adb）+ `pq` |
+| CNE 模组热更 | adb（shell UID）或 Portal；`sha256sum` |
 | QQ 机器人 | Python + `aiohttp` + 官方机器人凭据 + `opencode` |
 
 ## 8. 已知限制

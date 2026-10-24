@@ -10,6 +10,7 @@
 
 ## 变更记录
 
+- **2026-10-24**：新增 `cne-mod-patch`（CNE 模组文件热更：备份、推送、哈希校验、重启）。
 - **2026-10-24**：文档示例改为工具调用；bash 代码块从 43 个减到 18 个，剩余为没有对应工具的操作（curl POST、音轨下载、`gopeed wait`、交互式 `ai chat`、ADB 底层参考）。
 - **2026-10-24**：把常用命令行封装成工具：`ai.*`（问模型/列模型/探活/双模型对聊）、`bili_im.*`（B 站私信）、`pq.*`（按屏幕文字操作手机）。文档改为工具优先，命令行保留作备用。
 - **2026-10-24**：新增 `bili-replies`（查自己评论下的新回复并逐条回复）和 `feiyu-persona`（大肥鱼口吻）；两者都不含自动轮询或自动回复。
@@ -25,6 +26,7 @@
 | `bili-replies` | B 站评论区回声：查自己评论下的新回复并逐条回复 | [SKILL.md](skills/bili-replies/SKILL.md) |
 | `feiyu-persona` | 大肥鱼人格：QQ 群友口吻的短句说话方式 | [SKILL.md](skills/feiyu-persona/SKILL.md) |
 | `browser` | 后台浏览器：UA、重定向、Cookie、表单、HTML 转文本 | [SKILL.md](skills/browser/SKILL.md) · [scripts](skills/browser/scripts) |
+| `cne-mod-patch` | CNE 模组文件热更：备份、推送、哈希校验、重启游戏 | [SKILL.md](skills/cne-mod-patch/SKILL.md) |
 | `github` | GitHub：搜索、文件、Issue/PR、fork/star/clone、建仓库、发文件 | [SKILL.md](skills/github/SKILL.md) · [scripts](skills/github/scripts) |
 | `gopeed` | 手机 Gopeed 下载器：新建/暂停/继续/删除任务 | [SKILL.md](skills/gopeed/SKILL.md) · [scripts](skills/gopeed/scripts) |
 | `media-transcribe` | 离线转写：sherpa-onnx + Paraformer | [SKILL.md](skills/media-transcribe/SKILL.md) · [scripts](skills/media-transcribe/scripts) |
@@ -46,6 +48,7 @@
 | `bili-replies` | Node 24+，共用 B 站 cookie |
 | `feiyu-persona` | 无依赖，纯提示词 |
 | `browser` | `web.fetch` 工具或 `fetch.js` / `curl`；Node 24+ |
+| `cne-mod-patch` | `adb` 或 Portal、`sha256sum`、Termux |
 | `github` | Bun 插件、`gh` 2.40+、`git`、`jq` |
 | `gopeed` | `gopeed.*` 工具或 `gopeed` CLI、Gopeed 1.9+ API、`curl`、`jq` |
 | `media-transcribe` | `media.transcribe` 工具；Python 3.10+、`sherpa-onnx`、`ffmpeg`、80MB 模型 |
