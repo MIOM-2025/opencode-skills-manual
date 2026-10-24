@@ -457,7 +457,7 @@ async function homeFeed(count = 10) {
 function parseArgs(argv) {
   const args = [];
   const flags = new Map();
-  const takesValue = new Set(['page', 'seconds', 'count', 'folder', 'folder-id', 'progress', 'intro', 'privacy', 'limit', 'images', 'image']);
+  const takesValue = new Set(['page', 'seconds', 'count', 'folder', 'folder-id', 'progress', 'intro', 'privacy', 'limit', 'images', 'image', 'out', 'root', 'pn', 'ps', 'business', 'title', 'status', 'rpid']);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith('--')) {
@@ -597,16 +597,35 @@ async function cmdComments(args) {
   }, null, 2));
 }
 
+async function playerSubtitleTracks(bvid, cid, pageNo) {
+  const { body } = await json(`https://api.bilibili.com/x/player/v2?bvid=${encodeURIComponent(bvid)}&cid=${cid}`,
+    { referer: `https://www.bilibili.com/video/${bvid}?p=${pageNo}` });
+  if (body.code !== 0) throw new Error(`player: ${body.code} ${body.message || ''}`);
+  return body.data?.subtitle?.subtitles || [];
+}
+
+function cueSignature(cues) {
+  return cues.map(c => `${Number(c.from).toFixed(2)}|${c.text}`).join('\n');
+}
+
+async function loadSubtitleCues(bvid, track) {
+  const url = track?.subtitle_url?.startsWith('//') ? 'https:' + track.subtitle_url : track?.subtitle_url;
+  if (!url) return null;
+  const { body: sub } = await json(url, { referer: `https://www.bilibili.com/video/${bvid}` });
+  return (sub.body || []).map(c => ({
+    from: c.from, to: c.to, text: String(c.content || '').trim()
+  })).filter(c => c.text);
+}
+
 async function cmdSubtitles(args, flags) {
   if (!args[0]) throw new Error('usage: bili subtitles BV... [--page 1]');
   const v = await videoInfo(args[0]);
   const pageNo = Math.max(1, Number(flags.get('page') || 1));
   const page = (v.pages || [])[pageNo - 1];
   if (!page?.cid) throw new Error(`no page ${pageNo} for ${v.bvid}`);
-  const { body } = await json(`https://api.bilibili.com/x/player/v2?bvid=${encodeURIComponent(v.bvid)}&cid=${page.cid}`,
-    { referer: `https://www.bilibili.com/video/${v.bvid}?p=${pageNo}` });
-  if (body.code !== 0) throw new Error(`player: ${body.code} ${body.message || ''}`);
-  const tracks = body.data?.subtitle?.subtitles || [];
+
+  const pick = ts => ts.find(t => !String(t.lan || '').startsWith('ai-')) || ts[0];
+  const tracks = await playerSubtitleTracks(v.bvid, page.cid, pageNo);
   if (!tracks.length) {
     console.log(JSON.stringify({
       bvid: v.bvid, cid: page.cid, page: pageNo, part: page.part,
@@ -614,28 +633,42 @@ async function cmdSubtitles(args, flags) {
     }, null, 2));
     return;
   }
-  const track = tracks.find(t => !String(t.lan || '').startsWith('ai-')) || tracks[0];
-  const url = track.subtitle_url?.startsWith('//') ? 'https:' + track.subtitle_url : track.subtitle_url;
-  if (!url) throw new Error('subtitle track has no URL');
-  const { body: sub } = await json(url, { referer: `https://www.bilibili.com/video/${v.bvid}` });
-  const rawCues = (sub.body || []).map(c => ({
-    from: c.from, to: c.to, text: String(c.content || '').trim()
-  })).filter(c => c.text);
-  const maxTo = rawCues.reduce((m, c) => Math.max(m, Number(c.to) || 0), 0);
-  const suspicious = v.duration > 0 && maxTo > v.duration + 30;
-  const cues = suspicious ? [] : rawCues;
+  const track = pick(tracks);
+  const first = await loadSubtitleCues(v.bvid, track);
+  if (!first) throw new Error('subtitle track has no URL');
+
+  // 交叉校验：重新拿一次签名 URL 再拉一遍。B 站的 AI 字幕服务有时会返回别的视频的字幕，
+  // 两次内容不一致就说明这轨不是本视频的，直接判定不可信。
+  let mismatch = false;
+  try {
+    const again = await loadSubtitleCues(v.bvid, pick(await playerSubtitleTracks(v.bvid, page.cid, pageNo)));
+    if (again && again.length && cueSignature(again) !== cueSignature(first)) mismatch = true;
+  } catch { /* 网络抖动不算不可信 */ }
+
+  const maxTo = first.reduce((m, c) => Math.max(m, Number(c.to) || 0), 0);
+  const spanBad = v.duration > 0 && (maxTo > v.duration + 30 || maxTo < v.duration * 0.5);
+  const density = v.duration > 0 ? first.length / (v.duration / 60) : 0;
+  const densityBad = v.duration > 0 && (density < 2 || density > 400);
+
+  const unreliable = mismatch || spanBad || densityBad;
+  const cues = unreliable ? [] : first;
+  const reasons = [];
+  if (mismatch) reasons.push('两次拉取内容不一致（疑似串到别的视频）');
+  if (spanBad) reasons.push(`时间轴跨度 ${maxTo.toFixed(1)}s 与视频 ${v.duration}s 不符`);
+  if (densityBad) reasons.push(`字幕密度异常 ${density.toFixed(1)} 条/分钟`);
+
   console.log(JSON.stringify({
     bvid: v.bvid, cid: page.cid, page: pageNo, part: page.part,
     duration: v.duration,
     language: track.lan_doc || track.lan,
     aiGenerated: String(track.lan || '').startsWith('ai-'),
     tracks: tracks.map(t => ({ lan: t.lan, lan_doc: t.lan_doc, url: t.subtitle_url })),
-    note: suspicious
-      ? `Subtitle duration mismatch (${maxTo.toFixed(1)}s vs video ${v.duration}s); ignored unreliable track.`
+    note: unreliable
+      ? `Unreliable subtitle track ignored: ${reasons.join('；')}。改用音频转写 + 画面。`
       : (String(track.lan || '').startsWith('ai-') ? 'AI-generated subtitle; verify against video.' : ''),
     text: cues.map(c => c.text).join('\n'),
     cues,
-    rawCueCount: rawCues.length
+    rawCueCount: first.length
   }, null, 2));
 }
 
@@ -695,9 +728,14 @@ async function cmdComment(args, flags) {
     body: body.toString(),
     referer: `https://www.bilibili.com/video/${v.bvid}`
   });
+  const rpid = out.data?.rpid || null;
+  if (out.code === 0 && rpid) {
+    recordMyComment({ bvid: v.bvid, aid: v.aid, rpid, root: '0', parent: '0', text: message, kind: 'top' });
+    upsertSeen({ bvid: v.bvid, title: v.title, status: '评论', rpid: String(rpid) });
+  }
   console.log(JSON.stringify({
     http: res.status, code: out.code, message: out.message,
-    rpid: out.data?.rpid || null, bvid: v.bvid, comment: message
+    rpid, bvid: v.bvid, comment: message
   }));
   if (out.code !== 0) process.exitCode = 7;
 }
@@ -722,6 +760,261 @@ async function cmdDeleteComment(args, flags) {
   });
   console.log(JSON.stringify({ http: res.status, code: out.code, message: out.message, bvid: v.bvid, rpid }));
   if (out.code !== 0) process.exitCode = 7;
+}
+
+/* ---------- 评论回声：记录自己发过的评论、读楼中楼、回复 ---------- */
+
+const MY_COMMENTS_FILE = path.join(HOME, 'my-comments.json');
+
+function readMyComments() {
+  try {
+    const list = JSON.parse(fs.readFileSync(MY_COMMENTS_FILE, 'utf8'));
+    return Array.isArray(list) ? list : [];
+  } catch { return []; }
+}
+
+function writeMyComments(list) {
+  ensureHome();
+  fs.writeFileSync(MY_COMMENTS_FILE, JSON.stringify(list.slice(0, 300), null, 2) + '\n', { mode: 0o600 });
+}
+
+function recordMyComment(entry) {
+  const list = readMyComments();
+  const idx = list.findIndex(x => String(x.rpid) === String(entry.rpid));
+  const base = idx >= 0 ? list[idx] : { checked_at: 0, last_count: 0 };
+  const row = { ...base, ...entry, mid: String(entry.mid || myMid()), ctime: entry.ctime || Math.floor(Date.now() / 1000) };
+  if (idx >= 0) list[idx] = row; else list.unshift(row);
+  writeMyComments(list);
+}
+
+function myMid() {
+  return String(cookieValue('DedeUserID') || '');
+}
+
+async function repliesOf(aid, rpid, pn, ps) {
+  const qs = new URLSearchParams({
+    type: '1', oid: String(aid), root: String(rpid), pn: String(pn), ps: String(ps)
+  });
+  const { body } = await json(`https://api.bilibili.com/x/v2/reply/reply?${qs}`, {
+    referer: `https://www.bilibili.com/video/av${aid}`
+  });
+  if (body.code !== 0) throw new Error(`replies: ${body.code} ${body.message || ''}`);
+  const d = body.data || {};
+  const upMid = String(d.upper?.mid || '');
+  return {
+    count: d.page?.count || 0,
+    root: d.root ? {
+      rpid: d.root.rpid, user: d.root.member?.uname, message: d.root.content?.message,
+      like: d.root.like, ctime: d.root.ctime
+    } : null,
+    replies: (d.replies || []).map(r => ({
+      rpid: r.rpid, parent: r.parent, mid: String(r.mid), user: r.member?.uname,
+      message: r.content?.message, like: r.like, ctime: r.ctime,
+      from_me: String(r.mid) === myMid(),
+      is_up: String(r.mid) === upMid
+    }))
+  };
+}
+
+async function cmdReplyList(args, flags) {
+  const [bvid, rpid] = args;
+  if (!bvid || !rpid) throw new Error('usage: bili reply-list BV... RPID [--pn 1] [--ps 20]');
+  const v = await videoInfo(bvid);
+  const pn = Math.max(1, Number(flags.get('pn') || 1));
+  const ps = Math.min(49, Math.max(1, Number(flags.get('ps') || 20)));
+  const data = await repliesOf(v.aid, rpid, pn, ps);
+  console.log(JSON.stringify({ bvid: v.bvid, aid: v.aid, rpid: String(rpid), pn, ...data }, null, 2));
+}
+
+async function cmdReply(args, flags) {
+  const [bvid, rpid, ...textParts] = args;
+  const message = textParts.join(' ').trim();
+  if (!bvid || !rpid || !message) throw new Error('usage: bili reply BV... RPID "text" [--root ROOT_RPID] --yes');
+  if (!flags.has('yes')) {
+    console.log(JSON.stringify({ refused: true, reason: 'public write requires --yes', bvid, rpid, message }));
+    process.exitCode = 2;
+    return;
+  }
+  const csrf = requireCsrf();
+  const v = await videoInfo(bvid);
+  const root = String(flags.get('root') || rpid);
+  const form = new URLSearchParams({
+    oid: String(v.aid), type: '1', root, parent: String(rpid), message, plat: '1', csrf
+  });
+  const { res, body: out } = await json('https://api.bilibili.com/x/v2/reply/add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form.toString(),
+    referer: `https://www.bilibili.com/video/${v.bvid}`
+  });
+  const newRpid = out.data?.rpid || null;
+  if (out.code === 0 && newRpid) {
+    recordMyComment({ bvid: v.bvid, aid: v.aid, rpid: newRpid, root, parent: String(rpid), text: message, kind: 'reply' });
+    upsertSeen({ bvid: v.bvid, title: v.title, status: '评论', rpid: String(newRpid) });
+  }
+  console.log(JSON.stringify({
+    http: res.status, code: out.code, message: out.message,
+    rpid: newRpid, bvid: v.bvid, root, parent: String(rpid), comment: message
+  }));
+  if (out.code !== 0) process.exitCode = 7;
+}
+
+async function cmdMyComments(args) {
+  const limit = Math.max(1, Number(args[0] || 20));
+  const list = readMyComments().slice(0, limit);
+  console.log(JSON.stringify({ count: list.length, total: readMyComments().length, list }, null, 2));
+}
+
+async function cmdCheckReplies(args, flags) {
+  const limit = Math.max(1, Number(flags.get('limit') || 10));
+  const all = readMyComments();
+  const targets = all.slice(0, limit);
+  if (!targets.length) {
+    console.log(JSON.stringify({ checked: 0, note: '还没有记录到自己的评论；发评论/回复时会自动登记。' }));
+    return;
+  }
+  const out = [];
+  for (const item of targets) {
+    try {
+      const data = await repliesOf(item.aid, item.rpid, 1, 20);
+      const since = Number(item.checked_at || 0);
+      const fresh = data.replies.filter(r => Number(r.ctime) > since);
+      out.push({
+        bvid: item.bvid, rpid: String(item.rpid), my_comment: item.text,
+        total: data.count, previously_seen: item.last_count || 0, new: fresh
+      });
+      item.checked_at = Math.floor(Date.now() / 1000);
+      item.last_count = data.count;
+    } catch (e) {
+      out.push({ bvid: item.bvid, rpid: String(item.rpid), error: e.message });
+    }
+    await new Promise(r => setTimeout(r, 500));
+  }
+  writeMyComments(all);
+  const pending = out.filter(o => (o.new || []).length).length;
+  console.log(JSON.stringify({ checked: out.length, with_new_replies: pending, results: out }, null, 2));
+}
+
+/* ---------- 音频：单独下载 dash 音轨，供本地 ASR 使用 ---------- */
+
+async function downloadAudio(bvid, outPath) {
+  const v = await videoInfo(bvid);
+  const cid = (v.pages || [])[0]?.cid;
+  if (!cid) throw new Error(`no cid for ${bvid}`);
+  const qs = new URLSearchParams({
+    bvid: v.bvid, cid: String(cid), fnval: '16', fnver: '0', fourk: '1'
+  });
+  const { body } = await json(`https://api.bilibili.com/x/player/playurl?${qs}`, {
+    referer: `https://www.bilibili.com/video/${v.bvid}`
+  });
+  if (body.code !== 0) throw new Error(`playurl: ${body.code} ${body.message || ''}`);
+  const audios = (body.data?.dash?.audio || []).slice().sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0));
+  if (!audios.length) throw new Error('no dash audio stream (login required?)');
+  const pick = audios[0];
+  const url = pick.baseUrl || pick.base_url;
+  const res = await request(url, { referer: `https://www.bilibili.com/video/${v.bvid}` });
+  if (!res.ok) throw new Error(`audio download HTTP ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  fs.writeFileSync(outPath, buf);
+  return {
+    path: outPath, bytes: buf.length, duration: v.duration,
+    mimeType: pick.mimeType || pick.mime_type || '', bandwidth: pick.bandwidth || 0
+  };
+}
+
+async function cmdAudio(args, flags) {
+  const [bvid] = args;
+  if (!bvid) throw new Error('usage: bili audio BV... [--out /path/file.m4a]');
+  const out = String(flags.get('out') || path.join(HOME, 'audio', `${bvid}.m4a`));
+  const info = await downloadAudio(bvid, out);
+  console.log(JSON.stringify({ bvid, ...info }, null, 2));
+}
+
+/* ---------- 判重表 seen.md：看过/评论过哪些视频 ---------- */
+
+const SEEN_FILE = path.join(HOME, 'seen.md');
+
+function stamp() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function seenRows() {
+  if (!fs.existsSync(SEEN_FILE)) return [];
+  const out = [];
+  for (const line of fs.readFileSync(SEEN_FILE, 'utf8').split(/\r?\n/)) {
+    if (!line.startsWith('| BV')) continue;
+    const c = line.split('|').map(s => s.trim());
+    const bvid = c[1];
+    if (!/^BV[0-9A-Za-z]{8,}$/.test(bvid)) continue;
+    out.push({ bvid, title: c[2] || '', time: c[3] || '', status: c[4] || '', rpid: c[5] || '' });
+  }
+  return out;
+}
+
+function saveSeen(rows) {
+  ensureHome();
+  const lines = [
+    '# B站判重表', '',
+    '| BV | 标题 | 时间 | 状态 | rpid |',
+    '| --- | --- | --- | --- | --- |',
+    ...rows.map(r => `| ${r.bvid} | ${(r.title || '').replace(/\|/g, '/')} | ${r.time} | ${r.status} | ${r.rpid || ''} |`)
+  ];
+  fs.writeFileSync(SEEN_FILE, lines.join('\n') + '\n', { mode: 0o600 });
+}
+
+function upsertSeen(entry) {
+  const rows = seenRows();
+  const i = rows.findIndex(r => r.bvid === entry.bvid);
+  if (i >= 0) rows[i] = { ...rows[i], ...entry, time: entry.time || rows[i].time };
+  else rows.unshift({ time: stamp(), status: '看过', rpid: '', ...entry });
+  saveSeen(rows);
+  return rows;
+}
+
+async function cmdSeen(args) {
+  const limit = Math.max(1, Number(args[0] || 50));
+  const rows = seenRows();
+  console.log(JSON.stringify({ file: SEEN_FILE, total: rows.length, rows: rows.slice(0, limit) }, null, 2));
+}
+
+async function cmdSeenCheck(args) {
+  const [bvid] = args;
+  if (!bvid) throw new Error('usage: bili seen-check BV...');
+  const row = seenRows().find(r => r.bvid === bvid);
+  console.log(JSON.stringify({ bvid, seen: Boolean(row), row: row || null }));
+}
+
+async function cmdSeenAdd(args, flags) {
+  const [bvid] = args;
+  if (!bvid) throw new Error('usage: bili seen-add BV... [--title 标题] [--status 看过|评论|跳过] [--rpid 123]');
+  const rows = upsertSeen({
+    bvid,
+    title: String(flags.get('title') || ''),
+    status: String(flags.get('status') || '看过'),
+    rpid: String(flags.get('rpid') || '')
+  });
+  console.log(JSON.stringify({ bvid, total: rows.length, row: rows.find(r => r.bvid === bvid) }, null, 2));
+}
+
+async function cmdEmotes(args, flags) {
+  const business = String(flags.get('business') || 'reply');
+  const { body } = await json(`https://api.bilibili.com/x/emote/user/panel/web?business=${encodeURIComponent(business)}`, {
+    referer: 'https://www.bilibili.com/'
+  });
+  if (body.code !== 0) throw new Error(`emotes: ${body.code} ${body.message || ''}`);
+  const q = (args[0] || '').trim();
+  const list = [];
+  for (const p of body.data?.packages || []) {
+    for (const e of p.emote || []) {
+      const alias = e.meta?.alias || '';
+      if (q && !`${e.text}${alias}`.includes(q)) continue;
+      list.push({ text: e.text, alias, package: p.text, url: e.url });
+    }
+  }
+  console.log(JSON.stringify({ business, count: list.length, list }, null, 2));
 }
 
 async function cmdHome(args) {
@@ -969,6 +1262,15 @@ async function main() {
     case 'dynamic': return cmdDynamic(args, flags);
     case 'comment': return cmdComment(args, flags);
     case 'delete-comment': return cmdDeleteComment(args, flags);
+    case 'reply-list': return cmdReplyList(args, flags);
+    case 'reply': return cmdReply(args, flags);
+    case 'my-comments': return cmdMyComments(args);
+    case 'check-replies': return cmdCheckReplies(args, flags);
+    case 'emotes': return cmdEmotes(args, flags);
+    case 'audio': return cmdAudio(args, flags);
+    case 'seen': return cmdSeen(args);
+    case 'seen-check': return cmdSeenCheck(args);
+    case 'seen-add': return cmdSeenAdd(args, flags);
     case 'search': return cmdSearch(args);
     case 'ua':
       if (args[0] === 'mobile') writeUA(MOBILE_UA);
@@ -1002,6 +1304,15 @@ Usage:
   bili dynamic "text" [--images a.jpg,b.jpg] --yes
   bili comment BV... "text" --yes
   bili delete-comment BV... RPID --yes
+  bili reply-list BV... RPID [--pn 1] [--ps 20]   楼中楼回复
+  bili reply BV... RPID "text" [--root ROOT_RPID] --yes
+  bili my-comments [N]          自己发过的评论记录
+  bili check-replies [--limit 10]  扫描自己评论下的新回复
+  bili emotes [关键词]           评论可用的 [表情] 名
+  bili audio BV... [--out FILE]  只下音轨，给本地 ASR 用
+  bili seen [N]                  判重表（看过/评论过）
+  bili seen-check BV...          这条看过没有
+  bili seen-add BV... [--title 标题] [--status 看过|评论|跳过] [--rpid 123]
   bili search "keyword"          video search
   bili ua [desktop|mobile]       switch User-Agent
 

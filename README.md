@@ -29,7 +29,7 @@
 | `cne-mod-patch` | CNE 模组文件热更：备份、推送、哈希校验、重启游戏 | [SKILL.md](skills/cne-mod-patch/SKILL.md) |
 | `github` | GitHub：搜索、文件、Issue/PR、fork/star/clone、建仓库、发文件 | [SKILL.md](skills/github/SKILL.md) · [scripts](skills/github/scripts) |
 | `gopeed` | 手机 Gopeed 下载器：新建/暂停/继续/删除任务 | [SKILL.md](skills/gopeed/SKILL.md) · [scripts](skills/gopeed/scripts) |
-| `media-transcribe` | 离线转写：sherpa-onnx + Paraformer | [SKILL.md](skills/media-transcribe/SKILL.md) · [scripts](skills/media-transcribe/scripts) |
+| `media-transcribe` | 离线转写：Paraformer（中文）/ Whisper（英文） | [SKILL.md](skills/media-transcribe/SKILL.md) · [scripts](skills/media-transcribe/scripts) |
 | `phone-back` | Android 返回键 | [SKILL.md](skills/phone-back/SKILL.md) |
 | `phone-home` | Android 主界面键 | [SKILL.md](skills/phone-home/SKILL.md) |
 | `phone-recents` | Android 多任务键 | [SKILL.md](skills/phone-recents/SKILL.md) |

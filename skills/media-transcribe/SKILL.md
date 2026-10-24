@@ -53,6 +53,18 @@ node "$BILI" audio BV1xx... --out $PREFIX/tmp/opencode/a.m4a
 
 再 `media.transcribe({ input: "/.../a.m4a" })`。309 秒音频约 16 秒转完。
 
+## 英文 / 混合语言：Whisper
+
+Paraformer 只适合中文。英文或中英混合用同目录的 `transcribe_whisper.py`（sherpa-onnx Whisper 导出，仍完全离线；没有对应工具，只能用 CLI）：
+
+```bash
+python ~/.config/opencode/skills/media-transcribe/scripts/transcribe_whisper.py a.m4a \
+  --model-dir ~/.cache/opencode/asr/models/<whisper-model> \
+  --language auto --output out/prefix
+```
+
+模型目录要有 `*-encoder*.onnx`、`*-decoder*.onnx`、`tokens.txt`；int8 优先。输出格式与 Paraformer 一致（JSON + 时间轴文本）。
+
 ## 处理策略
 
 1. 优先读取 B 站 AI/CC 字幕。
@@ -76,6 +88,7 @@ node "$BILI" audio BV1xx... --out $PREFIX/tmp/opencode/a.m4a
 | Python 包 | `sherpa-onnx`（离线推理） |
 | 系统命令 | `ffmpeg`、`ffprobe`（抽音频、转 16k 单声道） |
 | 模型 | `sherpa-onnx-paraformer-zh-small-2024-03-09`，约 80MB |
+| 可选模型 | Whisper 导出（英文/混合语言）：`*-encoder*.onnx`、`*-decoder*.onnx`、`tokens.txt`，int8 优先 |
 | 模型目录 | `~/.cache/opencode/asr/models/` |
 | 磁盘 | 建议 ≥200MB（模型 + 中间 wav） |
 | 网络 | 不需要，完全离线 |
