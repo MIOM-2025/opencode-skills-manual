@@ -41,17 +41,23 @@ media.transcribe({
 ~/.config/opencode/skills/media-transcribe/scripts/transcribe_sherpa.py
 ```
 
-## B 站视频的音轨
+## B 站视频的音轨（必须完整下载，不许截断）
 
-`media.frames` 下的 mp4 只有视频流，直接转写会报 “Output file does not contain any stream”。
-先用 bilibili-web 的脚本拿音轨（这一步没有对应工具，只能用 CLI）：
+`media.frames` 下的 mp4 只有视频流，直接转写会报 “Output file does not contain any stream”。取音轨两种方式，任选其一：
 
 ```bash
+# 方式 1：bilibili-web 的脚本（如果这条命令可用）
 BILI=~/.config/opencode/skills/bilibili-web/scripts/bili.js
 node "$BILI" audio BV1xx... --out $PREFIX/tmp/opencode/a.m4a
+
+# 方式 2：yt-dlp 兜底（本机实测可用）
+cd $PREFIX/tmp/opencode
+yt-dlp -f bestaudio -o 'a.%(ext)s' --no-playlist 'https://www.bilibili.com/video/BV1xx...'
 ```
 
-再 `media.transcribe({ input: "/.../a.m4a" })`。309 秒音频约 16 秒转完。
+- 一定要整条下载完再转写，不要只截前几十秒；转写结果里第一段到最后一秒都要有覆盖。
+- 下载完先 `ls -lh` 看体积是否合理（几分钟的片子一般几 MB 到十几 MB）。
+- 再 `media.transcribe({ input: "/.../a.m4a" })`。309 秒音频约 16 秒转完。
 
 ## 英文 / 混合语言：Whisper
 
@@ -59,11 +65,23 @@ Paraformer 只适合中文。英文或中英混合用同目录的 `transcribe_wh
 
 ```bash
 python ~/.config/opencode/skills/media-transcribe/scripts/transcribe_whisper.py a.m4a \
-  --model-dir ~/.cache/opencode/asr/models/<whisper-model> \
-  --language auto --output out/prefix
+  --model-dir ~/.cache/opencode/asr/models/sherpa-onnx-whisper-base.en \
+  --language en --output out/prefix
 ```
 
-模型目录要有 `*-encoder*.onnx`、`*-decoder*.onnx`、`tokens.txt`；int8 优先。输出格式与 Paraformer 一致（JSON + 时间轴文本）。
+模型目录要有 `*-encoder*.onnx`、`*-decoder*.onnx`、`*tokens.txt`；int8 优先。输出格式与 Paraformer 一致（JSON + 时间轴文本）。
+
+模型下载（约 200 MB，一次就够）：
+
+```bash
+cd ~/.cache/opencode/asr/models
+curl -L -C - -O 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.en.tar.bz2'
+tar xjf sherpa-onnx-whisper-base.en.tar.bz2 && rm sherpa-onnx-whisper-base.en.tar.bz2
+```
+
+- 下载慢就断点续传（`-C -`），下完先 `tar tjf` 验一遍再解压，别拿半截包硬解。
+- 判断用哪个模型：音频是中文讲解 → Paraformer；英文/中英混杂 → Whisper base.en。
+- 如果 Paraformer 转出来是「嗯 / 啦啦 / 我爱你」这种碎片，多半是没有旁白、只有 BGM，别硬猜内容，改走抽帧看画面。
 
 ## 处理策略
 

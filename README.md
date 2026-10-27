@@ -1,6 +1,6 @@
 # OpenCode 技能使用手册
 
-一套在 **Android + Termux + OpenCode** 环境下运行的技能手册合集，覆盖手机控制、B 站、GitHub、下载器、离线转写和 QQ 机器人等场景。
+一套在 **Android + Termux + OpenCode** 环境下运行的技能手册合集，覆盖手机控制、B 站、GitHub、下载器、离线转写、CNE 模组和 QQ 机器人等场景。
 
 - 每个技能目录下有 `SKILL.md`：技能声明、使用说明、示例
 - 多数技能附带可直接运行的 `scripts/`（已脱敏）
@@ -10,6 +10,8 @@
 
 ## 变更记录
 
+- **2026-10-27**：新增 `cne-touch-port`、`cne-vhs-filter`、`generic-app-install`、`generic-repo-push`。
+- **2026-10-27**：新增 `deepseek-web`（网页版转本地 OpenAI 端点）。**非官方逆向接口，可能触发风控，文档已标注不建议日常使用**。
 - **2026-10-24**：新增 `cne-mod-patch`（CNE 模组文件热更：备份、推送、哈希校验、重启）。
 - **2026-10-24**：文档示例改为工具调用；bash 代码块从 43 个减到 18 个，剩余为没有对应工具的操作（curl POST、音轨下载、`gopeed wait`、交互式 `ai chat`、ADB 底层参考）。
 - **2026-10-24**：把常用命令行封装成工具：`ai.*`（问模型/列模型/探活/双模型对聊）、`bili_im.*`（B 站私信）、`pq.*`（按屏幕文字操作手机）。文档改为工具优先，命令行保留作备用。
@@ -27,6 +29,11 @@
 | `feiyu-persona` | 大肥鱼人格：QQ 群友口吻的短句说话方式 | [SKILL.md](skills/feiyu-persona/SKILL.md) |
 | `browser` | 后台浏览器：UA、重定向、Cookie、表单、HTML 转文本 | [SKILL.md](skills/browser/SKILL.md) · [scripts](skills/browser/scripts) |
 | `cne-mod-patch` | CNE 模组文件热更：备份、推送、哈希校验、重启游戏 | [SKILL.md](skills/cne-mod-patch/SKILL.md) |
+| `cne-touch-port` | CNE touch 仓库改造成新 Port：模板复制、改包名、Actions 构建 | [SKILL.md](skills/cne-touch-port/SKILL.md) |
+| `cne-vhs-filter` | CNE 模组 VHS/CRT 滤镜与备用生命图标 | [SKILL.md](skills/cne-vhs-filter/SKILL.md) |
+| `deepseek-web` | DeepSeek 网页版转本地 OpenAI 端点（非官方，注意风控） | [SKILL.md](skills/deepseek-web/SKILL.md) · [scripts](skills/deepseek-web/scripts) |
+| `generic-app-install` | 通用安装：APK / split APK / Termux 包，并验证能启动 | [SKILL.md](skills/generic-app-install/SKILL.md) |
+| `generic-repo-push` | 通用 Git 提交/推送：任意仓库与远端，含 TLS 失败兜底 | [SKILL.md](skills/generic-repo-push/SKILL.md) |
 | `github` | GitHub：搜索、文件、Issue/PR、fork/star/clone、建仓库、发文件 | [SKILL.md](skills/github/SKILL.md) · [scripts](skills/github/scripts) |
 | `gopeed` | 手机 Gopeed 下载器：新建/暂停/继续/删除任务 | [SKILL.md](skills/gopeed/SKILL.md) · [scripts](skills/gopeed/scripts) |
 | `media-transcribe` | 离线转写：Paraformer（中文）/ Whisper（英文） | [SKILL.md](skills/media-transcribe/SKILL.md) · [scripts](skills/media-transcribe/scripts) |
@@ -49,6 +56,11 @@
 | `feiyu-persona` | 无依赖，纯提示词 |
 | `browser` | `web.fetch` 工具或 `fetch.js` / `curl`；Node 24+ |
 | `cne-mod-patch` | `adb` 或 Portal、`sha256sum`、Termux |
+| `cne-touch-port` | `gh`、`git`、GitHub Actions |
+| `cne-vhs-filter` | CNE 源码、`glslangValidator`（可选） |
+| `deepseek-web` | Node 24+、`curl`、`base64`、DeepSeek 网页账号 |
+| `generic-app-install` | `phone_install` 或 `adb`、`pkg`、`pip` |
+| `generic-repo-push` | `git`、`gh`、`ssh-keygen` |
 | `github` | Bun 插件、`gh` 2.40+、`git`、`jq` |
 | `gopeed` | `gopeed.*` 工具或 `gopeed` CLI、Gopeed 1.9+ API、`curl`、`jq` |
 | `media-transcribe` | `media.transcribe` 工具；Python 3.10+、`sherpa-onnx`、`ffmpeg`、80MB 模型 |

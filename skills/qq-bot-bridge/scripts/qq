@@ -3,11 +3,33 @@
 """qq —— 在 OpenCode/Termux 这边查看和操作 QQ 机器人会话。
 
 用法：
+  qq help [命令]         查看 QQ 命令总览 / 单个命令详细用法
   qq status              运行状态
   qq tail [N]            最近 N 条收发消息（默认 20）
   qq send <文本>          以机器人身份发给最近私聊的人（5 分钟被动回复窗口内）
   qq send -g <group_openid> <文本>
   qq sessions            列出所有桥接会话
+  qq mode [owner|open]   查看/切换对话模式（owner=仅主人，open=所有人）
+  qq groups              查看所有群配置
+  qq gadd <群ID或群名> [k=v…]  设置群配置：name= mb= sec= model= access=allow|deny|auto
+  qq gdel <群ID或群名>   删除群配置
+  qq grebind <旧群> <新群ID>   群号变了时迁移配置
+  qq galias <群> <别名>  给群加别名
+  qq users               列出用户单独配置
+  qq user <openid|me> [k=v…]  设置用户限额/模型：name= mb= sec= model= access=
+  qq userdel <openid|me> 清除用户配置
+  qq ulimit <openid|me> <MB|0>  快捷设置用户附件上限
+  qq access [scope target allow|deny|auto]  个人/群/会话开放权限
+  qq quota [scope target MB|0]  个人/群/会话/全局限额
+  qq defaults [limit=MB] [sec=N] [model=…]  全局默认限额/超时/模型
+  qq panel [status|install|refresh]  官方指令面板 / 自定义菜单
+  qq receive             检查群消息接收状态（全量消息 / 仅 @）
+  qq history [key|all] [N] [关键词]  查看聊天存档
+  qq sess <key> [k=v…]   给单个会话设覆盖：mb= sec= model= access=
+  qq sessdel <key>       清除会话覆盖
+  qq sessrename <key> <旧名> <新名>  重命名会话
+  qq models              列出可切换的模型
+  qq web [start|stop|status]  网页管理面板（http://127.0.0.1:6200）
   qq start|stop|restart  启停服务
   qq log [N]             最近 N 行运行日志
 """
@@ -20,6 +42,8 @@ import os
 import subprocess
 import sys
 import time
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 BASE = Path.home() / "qqbot"  # 运行数据目录（服务本体所在）
@@ -53,6 +77,7 @@ def cmd_status() -> int:
     pid = read_pid()
     print(f"服务：{'运行中' if alive(pid) else '未运行'}  PID={pid or '-'}")
     print(f"AppID：{bridge.APP_ID or '(未配置)'}")
+    print(f"对话模式：{bridge.MODE_LABELS.get(bridge.MODE, bridge.MODE)}（{bridge.MODE}）")
     print(f"工作区：{bridge.WORKSPACE}")
     c = bridge.load_contacts()
     lp = c.get("last_private")
@@ -190,6 +215,691 @@ def cmd_invite() -> int:
     return asyncio.run(go())
 
 
+def _mode_via_control(mode: str | None) -> dict | None:
+    url = f"http://127.0.0.1:{bridge.CONTROL_PORT}/mode"
+    try:
+        if mode:
+            body = json.dumps({"mode": mode}).encode()
+            req = urllib.request.Request(
+                url, data=body, method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            return json.loads(urllib.request.urlopen(req, timeout=5).read().decode())
+        return json.loads(urllib.request.urlopen(url, timeout=5).read().decode())
+    except Exception:
+        return None
+
+
+def cmd_mode(argv: list[str]) -> int:
+    m = (argv[0].strip().lower() if argv else "")
+    if not m:
+        r = _mode_via_control(None)
+        if r and r.get("ok"):
+            print(f"当前对话模式：{r.get('label')}（{r.get('mode')}）")
+        else:
+            print(f"当前对话模式：{bridge.MODE_LABELS.get(bridge.MODE, bridge.MODE)}（{bridge.MODE}）")
+        print("用法：qq mode owner   # 仅主人\n      qq mode open    # 所有人可对话")
+        return 0
+    aliases = {"me": "owner", "only": "owner", "1": "owner",
+               "all": "open", "public": "open", "2": "open"}
+    m = aliases.get(m, m)
+    if m not in bridge.MODE_LABELS:
+        print("模式只能是 owner 或 open")
+        return 2
+    r = _mode_via_control(m)
+    if r and r.get("ok"):
+        print(f"已切换：{r.get('label')}（{r.get('mode')}）")
+    else:
+        # 桥没在跑：直接写 mode.json，下次启动生效
+        bridge.set_mode(m)
+        print(f"桥未运行，已写入配置：{bridge.MODE_LABELS[m]}（{m}），启动后生效")
+    return 0
+
+
+def _api(method: str, path: str, payload: dict | None = None):
+    url = f"http://127.0.0.1:{bridge.CONTROL_PORT}{path}"
+    try:
+        if method == "POST":
+            req = urllib.request.Request(
+                url, data=json.dumps(payload or {}).encode(), method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            return json.loads(urllib.request.urlopen(req, timeout=8).read().decode())
+        return json.loads(urllib.request.urlopen(url, timeout=8).read().decode())
+    except Exception:
+        return None
+
+
+def _kv(args: list[str]) -> dict:
+    out = {}
+    for a in args:
+        if "=" in a:
+            k, v = a.split("=", 1)
+            out[k.strip().lower()] = v.strip()
+    return out
+
+
+def _num(v, cast=int):
+    try:
+        return cast(v)
+    except Exception:
+        return None
+
+
+def _guest_value(kv: dict):
+    key = next((k for k in ("access", "guest", "权限", "访客") if k in kv), None)
+    if not key:
+        return None, False
+    v = kv[key].strip().lower()
+    if v in {"auto", "follow", "inherit", "跟随", "-"}:
+        return None, True
+    return v in {"allow", "on", "open", "true", "1", "yes", "开", "开放", "允许"}, True
+
+
+def cmd_groups() -> int:
+    r = _api("GET", "/groups")
+    if not r or not r.get("ok"):
+        print("桥没在跑，无法读取群配置")
+        return 1
+    models = r.get("models") or []
+    oc = [(i, m) for i, m in enumerate(models, 1) if m.startswith("opencode/")]
+    print(f"模型库：共 {len(models)} 个（opencode 官方 {len(oc)} 个）")
+    for i, m in oc:
+        print(f"  {i}. {m}")
+    groups = r.get("groups") or []
+    print(f"\n群配置（{len(groups)} 个）：")
+    for g in groups:
+        mb = "全局" if g.get("limit_mb") is None else f"{g['limit_mb']:g}MB"
+        gv = g.get("guest")
+        gl = "跟随" if gv is None else "开放" if gv else "关闭"
+        alias = ("  别名=" + "、".join(g.get("aliases") or [])) if g.get("aliases") else ""
+        real = g.get("real_name") or ""
+        extra = (f"  QQ名={real}" if real else "") + (f"  {g.get('member_count')}人" if g.get("member_count") else "")
+        print(f"  {g['gid']}  {g.get('display')}  mb={mb} sec={g.get('max_seconds') or '全局'} "
+              f"model={g.get('model') or '全局'} access={gl}{alias}{extra}")
+    ov = r.get("overrides") or {}
+    if ov:
+        print("\n会话覆盖：")
+        for k, v in ov.items():
+            print(f"  {k} → {v}")
+    return 0
+
+
+def cmd_gadd(argv: list[str]) -> int:
+    if not argv:
+        print("用法：qq gadd <群ID> [name=显示名] [mb=9] [sec=300] [model=…] [access=allow|deny|auto]")
+        return 2
+    gid = argv[0]
+    kv = _kv(argv[1:])
+    payload = {"gid": gid}
+    if kv.get("name") or kv.get("display"):
+        payload["display"] = kv.get("name") or kv.get("display")
+    if kv.get("mb") or kv.get("limit"):
+        v = kv.get("mb") or kv.get("limit")
+        payload["limit_mb"] = None if v in {"0", "off", "none", "-"} else float(v)
+    if kv.get("sec") or kv.get("timeout"):
+        payload["max_seconds"] = int(kv.get("sec") or kv.get("timeout"))
+    if "model" in kv:
+        payload["model"] = "" if kv["model"].lower() in {"default", "global", "-"} else kv["model"]
+    guest_val, has_guest = _guest_value(kv)
+    if has_guest:
+        payload["guest"] = guest_val
+    r = _api("POST", "/group/set", payload)
+    if not r or not r.get("ok"):
+        print("保存失败：" + ((r or {}).get("error") or "桥没在跑"))
+        return 1
+    print(f"已保存 {gid} → {r.get('group')}")
+    return 0
+
+
+def cmd_gdel(argv: list[str]) -> int:
+    if not argv:
+        print("用法：qq gdel <群ID>")
+        return 2
+    r = _api("POST", "/group/del", {"gid": argv[0]})
+    print("已删除" if r and r.get("ok") else "没有这个群的配置")
+    return 0
+
+
+def cmd_sess(argv: list[str]) -> int:
+    if not argv:
+        print("用法：qq sess <会话key> [mb=9] [sec=300] [model=…] [access=allow|deny|auto]")
+        return 2
+    key = argv[0]
+    kv = _kv(argv[1:])
+    payload = {"key": key}
+    if kv.get("mb") or kv.get("limit"):
+        v = kv.get("mb") or kv.get("limit")
+        payload["limit_mb"] = None if v in {"0", "off", "none", "-"} else float(v)
+    if kv.get("sec") or kv.get("timeout"):
+        payload["max_seconds"] = int(kv.get("sec") or kv.get("timeout"))
+    if "model" in kv:
+        payload["model"] = "" if kv["model"].lower() in {"default", "global", "-"} else kv["model"]
+    guest_val, has_guest = _guest_value(kv)
+    if has_guest:
+        payload["guest"] = guest_val
+    r = _api("POST", "/session/override", payload)
+    if not r or not r.get("ok"):
+        print("保存失败：" + ((r or {}).get("error") or "桥没在跑"))
+        return 1
+    print(f"已保存覆盖 {key} → {r.get('override')}")
+    return 0
+
+
+def cmd_sessdel(argv: list[str]) -> int:
+    if not argv:
+        print("用法：qq sessdel <会话key>")
+        return 2
+    r = _api("POST", "/session/override/del", {"key": argv[0]})
+    print("已清除覆盖" if r and r.get("ok") else "本来就没有覆盖")
+    return 0
+
+
+def cmd_models(argv: list[str] | None = None) -> int:
+    argv = argv or []
+    force = bool(argv and argv[0].lower() in {"refresh", "刷新", "-f"})
+    r = _api("GET", "/models" + ("?refresh=1" if force else ""))
+    if not r or not r.get("ok"):
+        print("桥没在跑，或没拿到模型列表（先跑 opencode models 确认）")
+        return 1
+    models = r.get("models") or []
+    arg = argv[0] if argv and not force else ""
+    if arg.lower() in {"all", "全部"}:
+        picked = list(enumerate(models, 1))
+    elif arg:
+        picked = [(i, m) for i, m in enumerate(models, 1) if arg.lower() in m.lower()]
+    else:
+        picked = [(i, m) for i, m in enumerate(models, 1) if m.startswith("opencode/")]
+    for i, m in picked:
+        print(f"{i}. {m}")
+    if not arg:
+        print(f"\n共 {len(models)} 个，其他 provider {len(models) - len(picked)} 个：qq models all 或 qq models <关键词>")
+    print(f"全局默认：{r.get('global') or '(未设置)'}")
+    return 0
+
+
+def _access_value(v: str) -> str:
+    v = (v or "").strip().lower()
+    if v in {"allow", "on", "open", "true", "1", "yes", "开", "开放", "允许"}:
+        return "allow"
+    if v in {"deny", "off", "close", "false", "0", "no", "关", "关闭", "禁止"}:
+        return "deny"
+    if v in {"auto", "inherit", "follow", "跟随", "-"}:
+        return "inherit"
+    raise ValueError("值只能是 allow / deny / auto")
+
+
+def cmd_access(argv: list[str]) -> int:
+    if not argv:
+        st = _api("GET", "/status") or {}
+        u = _api("GET", "/users") or {}
+        g = _api("GET", "/groups") or {}
+        print(f"开放权限（全局模式：{st.get('mode_label') or st.get('mode') or '?'}）")
+        print("\n个人：")
+        rows = [x for x in (u.get("users") or []) if x.get("guest") is not None]
+        for x in rows:
+            print(f"  {x.get('name') or x['uid']}  {x['uid']}  → {'开放' if x['guest'] else '关闭'}")
+        if not rows:
+            print("  没有单独设置（跟随群/全局）")
+        print("\n群：")
+        rows = [x for x in (g.get("groups") or []) if x.get("guest") is not None]
+        for x in rows:
+            print(f"  {x.get('display') or x['gid']}  {x['gid']}  → {'开放' if x['guest'] else '关闭'}")
+        if not rows:
+            print("  没有单独设置（跟随全局）")
+        print("\n用法：qq access user <openid|me> allow|deny|auto")
+        print("      qq access group <群ID或群名> allow|deny|auto")
+        print("      qq access session <private:…|group:…> allow|deny|auto")
+        return 0
+    scope = argv[0].strip().lower()
+    if scope not in {"user", "group", "session"}:
+        # 省略 scope 时默认按个人处理：qq access me allow
+        argv = ["user"] + argv
+        scope = "user"
+    if len(argv) < 3:
+        print("用法：qq access <user|group|session> <目标> <allow|deny|auto>")
+        return 2
+    target = argv[1]
+    if scope == "user":
+        target = _user_ref(target)
+    try:
+        value = _access_value(argv[2])
+    except ValueError as e:
+        print(e)
+        return 2
+    r = _api("POST", "/access/set", {"scope": scope, "target": target, "value": value})
+    if not r or not r.get("ok"):
+        print("保存失败：" + ((r or {}).get("error") or "桥没在跑"))
+        return 1
+    print(f"{scope} {r.get('target') or target} 开放权限 → {r.get('label') or value}")
+    return 0
+
+
+def _quota_value(v: str):
+    if v is None:
+        return None
+    v = v.strip().lower()
+    if v in {"", "0", "off", "none", "-", "auto", "follow", "跟随", "不限"}:
+        return None
+    return float(v)
+
+
+def cmd_quota(argv: list[str]) -> int:
+    if not argv:
+        g = _api("GET", "/groups") or {}
+        u = _api("GET", "/users") or {}
+        dft = (g.get("defaults") or {}).get("limit_mb")
+        print(f"限额中心（单条附件上限）\n\n全局默认：{'不限' if dft is None else f'{dft:g}MB'}")
+        print("\n个人：")
+        rows = [x for x in (u.get("users") or []) if x.get("limit_mb") is not None]
+        for x in rows:
+            print(f"  {x.get('name') or x['uid']}  → {x['limit_mb']:g}MB")
+        if not rows:
+            print("  没有单独设置（跟随群/全局）")
+        print("\n群：")
+        rows = [x for x in (g.get("groups") or []) if x.get("limit_mb") is not None]
+        for x in rows:
+            print(f"  {x.get('display') or x['gid']}  → {x['limit_mb']:g}MB")
+        if not rows:
+            print("  没有单独设置（跟随全局）")
+        print("\n用法：qq quota user <openid|me> <MB|0>")
+        print("      qq quota group <群ID或群名> <MB|0>")
+        print("      qq quota session <private:…|group:…> <MB|0>")
+        print("      qq quota default <MB|0>")
+        return 0
+    scope = argv[0].strip().lower()
+    if scope not in {"user", "group", "session", "default"}:
+        argv = ["user"] + argv
+        scope = "user"
+    if scope == "default":
+        if len(argv) < 2:
+            g = _api("GET", "/groups") or {}
+            dft = (g.get("defaults") or {}).get("limit_mb")
+            print(f"全局默认限额：{'不限' if dft is None else f'{dft:g}MB'}")
+            return 0
+        target, raw = "", argv[1]
+    else:
+        if len(argv) < 3:
+            print(f"用法：qq quota {scope} <目标> <MB|0>")
+            return 2
+        target, raw = argv[1], argv[2]
+        if scope == "user":
+            target = _user_ref(target)
+    try:
+        limit = _quota_value(raw)
+    except ValueError:
+        print("限额要填数字，0 表示跟随/不限")
+        return 2
+    r = _api("POST", "/quota/set", {"scope": scope, "target": target, "limit_mb": limit})
+    if not r or not r.get("ok"):
+        print("保存失败：" + ((r or {}).get("error") or "桥没在跑"))
+        return 1
+    shown = "不限/跟随" if r.get("limit_mb") is None else f"{r['limit_mb']:g}MB"
+    print(f"{scope} {r.get('target') or target} 限额 → {shown}")
+    return 0
+
+
+def cmd_defaults(argv: list[str]) -> int:
+    g = _api("GET", "/groups") or {}
+    d = g.get("defaults") or {}
+    if not argv:
+        limit = d.get("limit_mb")
+        sec = d.get("max_seconds") or 0
+        model = d.get("model") or "config.yaml"
+        print("全局默认（所有「跟随」最终落到这里）")
+        print(f"  限额：{'不限' if limit is None else f'{limit:g}MB'}")
+        print(f"  超时：{sec}s" if sec else "  超时：程序默认")
+        print(f"  模型：{model}")
+        print("\n用法：qq defaults limit=10 sec=600 model=opencode/xxx")
+        print("      limit=0 / sec=0 / model=default 表示回到默认")
+        return 0
+    payload = {}
+    try:
+        for item in argv:
+            if "=" not in item:
+                print(f"参数要写成 key=value：{item}")
+                return 2
+            k, v = item.split("=", 1)
+            k = k.strip().lower()
+            v = v.strip()
+            if k in {"limit", "mb", "limit_mb"}:
+                payload["limit_mb"] = None if v.lower() in {"", "0", "none", "off", "-"} else float(v)
+            elif k in {"sec", "secs", "timeout", "max_seconds"}:
+                payload["max_seconds"] = 0 if v.lower() in {"", "0", "none", "off", "-"} else int(float(v))
+            elif k in {"model", "模型"}:
+                payload["model"] = "" if v.lower() in {"", "0", "none", "off", "-", "default", "global"} else v
+            else:
+                print(f"不认识的字段：{k}（可用 limit / sec / model）")
+                return 2
+    except ValueError:
+        print("limit 要填数字，sec 要填整数")
+        return 2
+    r = _api("POST", "/default/set", payload)
+    if not r or not r.get("ok"):
+        print("保存失败：" + ((r or {}).get("error") or "桥没在跑"))
+        return 1
+    print("全局默认已更新")
+    return cmd_defaults([])
+
+
+def cmd_history(argv: list[str]) -> int:
+    if not argv:
+        r = _api("GET", "/history/list")
+        if not r or not r.get("ok"):
+            print("桥没在跑")
+            return 1
+        rows = r.get("keys") or []
+        if not rows:
+            print("还没有聊天记录。")
+            print("群聊需要群管理员开启「接收所有消息」才会存普通群消息。")
+            return 0
+        print(f"有记录的聊天（{len(rows)} 个）：")
+        for x in rows:
+            print(f"  {x.get('label')}  [{x.get('count')} 条]  最后 {x.get('last_time') or '-'}")
+            if x.get("last_text"):
+                print(f"    {x['last_text'][:100]}")
+        print("\n用法：qq history <key|all> [条数] [关键词]")
+        return 0
+    key = argv[0]
+    limit = 30
+    rest = argv[1:]
+    if rest and rest[0].isdigit():
+        limit = max(1, min(int(rest[0]), 500))
+        rest = rest[1:]
+    query = " ".join(rest).strip()
+    params = {"key": key, "limit": limit}
+    if query:
+        params["query"] = query
+    r = _api("GET", "/history?" + urllib.parse.urlencode(params))
+    if not r or not r.get("ok"):
+        print("读取失败：" + ((r or {}).get("error") or "桥没在跑"))
+        return 1
+    msgs = r.get("messages") or []
+    if not msgs:
+        print("没有记录" + (f"（关键词：{query}）" if query else ""))
+        return 0
+    print(f"{key} 最近 {len(msgs)} 条" + (f"（关键词：{query}）" if query else "") + "：")
+    for m in msgs:
+        who = "我" if m.get("dir") == "out" else (m.get("name") or (m.get("uid") or "?")[:8])
+        att = f" [附件 {len(m.get('attachments') or [])}]" if m.get("attachments") else ""
+        text = (m.get("text") or "").replace("\n", " ")
+        print(f"  {m.get('time') or ''}  {who}{att}: {text[:160]}")
+    return 0
+
+
+def _print_features(r: dict) -> None:
+    cache = r.get("cache") or {}
+    panels = cache.get("panels") or {}
+    print("指令面板：")
+    for scope, label in (("c2c", "私聊"), ("group", "群聊")):
+        records = panels.get(scope) or []
+        mine = [x for x in records if "<BOT_NAME>" in ((x.get("panel") or {}).get("remark") or "")]
+        if mine:
+            items = ((mine[0].get("panel") or {}).get("items") or [])
+            print(f"  {label}：已安装 {len(items)} 项  {mine[0].get('panel_id')}")
+        else:
+            print(f"  {label}：未安装")
+    menu = (cache.get("menu") or {}).get("menu") or {}
+    print(f"私聊自定义菜单：{len(menu.get('items') or [])} 项")
+    groups = r.get("groups") or []
+    if groups:
+        print("\n群消息接收：")
+        for g in groups:
+            print(f"  {g.get('display') or g.get('gid')}  {g.get('recv_msg_setting') or '未设置'}  "
+                  f"角色={g.get('member_role') or '?'}")
+    events = r.get("events") or []
+    if events:
+        print("\n最近系统事件：")
+        for e in events[-5:]:
+            print(f"  {time.strftime('%m-%d %H:%M', time.localtime(e.get('ts') or 0))}  "
+                  f"{e.get('type') or ''}  {e.get('gid') or e.get('uid') or ''}")
+
+
+def cmd_panel(argv: list[str]) -> int:
+    action = (argv[0].strip().lower() if argv else "status")
+    if action in {"install", "update", "sync", "安装"}:
+        print("正在创建/更新官方指令面板…")
+        r = _api("POST", "/features/install", {})
+    elif action in {"refresh", "check", "刷新"}:
+        print("正在刷新官方能力状态…")
+        r = _api("POST", "/features/refresh", {})
+    elif action in {"status", "状态", ""}:
+        r = _api("GET", "/features")
+    else:
+        print("用法：qq panel [status|install|refresh]")
+        return 2
+    if not r or not r.get("ok"):
+        print("操作失败：" + ((r or {}).get("error") or "桥没在跑，或没有面板权限"))
+        return 1
+    if action not in {"status", "状态", ""}:
+        full = _api("GET", "/features")
+        if full and full.get("ok"):
+            r = full
+    _print_features(r)
+    return 0
+
+
+def cmd_receive(argv: list[str]) -> int:
+    print("正在检查群消息接收状态…")
+    r = _api("POST", "/group/refresh", {})
+    if not r or not r.get("ok"):
+        print("检查失败：" + ((r or {}).get("error") or "桥没在跑"))
+        return 1
+    for g in r.get("groups") or []:
+        if g.get("error"):
+            print(f"  {g.get('gid')}  错误：{g['error']}")
+            continue
+        state = g.get("recv_msg_setting") or "未设置"
+        mark = "✅" if state == "all" else "⚠️"
+        print(f"  {mark} {g.get('name') or g.get('gid')}  {state}  角色={g.get('member_role') or '?'}")
+    st = _api("GET", "/status") or {}
+    last = float(st.get("last_at_event") or 0)
+    if last:
+        print(f"\n最近一次收到 @：{time.strftime('%m-%d %H:%M:%S', time.localtime(last))}")
+    else:
+        print("\n最近一次收到 @：本次启动后还没有")
+    print("\n只有 all（接收所有消息）才会把不 @ 机器人的群聊也存档。")
+    print("开启：群设置 → 机器人 → <BOT_NAME> → 消息接收 → 接收所有消息（需要群管理员）。")
+    print("「接收所有消息」最稳；「@ + 上下文」在部分群/客户端下可能不推 @ 事件，遇到 @ 没反应就切回 all。")
+    return 0
+
+
+MANAGE_PID = BASE / "manage.pid"
+
+
+def _web_pid() -> int | None:
+    try:
+        pid = int(MANAGE_PID.read_text().strip())
+        os.kill(pid, 0)
+        return pid
+    except Exception:
+        return None
+
+
+def _me_uid() -> str:
+    c = bridge.load_contacts()
+    uid = (c.get("last_private") or {}).get("openid") or ""
+    if not uid and bridge.ADMIN_USERS:
+        uid = sorted(bridge.ADMIN_USERS)[0]
+    return uid
+
+
+def _user_ref(ref: str) -> str:
+    return _me_uid() if ref.lower() in {"me", "我", "self"} else ref
+
+
+def cmd_users() -> int:
+    r = _api("GET", "/users")
+    if not r or not r.get("ok"):
+        print("桥没在跑")
+        return 1
+    users = r.get("users") or []
+    contacts = r.get("contacts") or {}
+    lp = contacts.get("last_private") or {}
+    admins = set(r.get("admins") or [])
+    if not users:
+        print("还没有单独的用户配置。")
+        print("用法：qq user <openid|me> mb=5 model=opencode/beam-free")
+        return 0
+    print(f"用户配置（{len(users)} 个）：")
+    for u in users:
+        name = u.get("name") or (lp.get("name") if lp.get("openid") == u["uid"] else "")
+        flags = " [管理员]" if u["uid"] in admins else ""
+        mb = "全局" if u.get("limit_mb") is None else f"{u['limit_mb']:g}MB"
+        gv = u.get("guest")
+        gl = "跟随" if gv is None else "开放" if gv else "关闭"
+        print(f"  {name + '  ' if name else ''}{u['uid']}{flags}")
+        print(f"    限额={mb} 超时={u.get('max_seconds') or '全局'} "
+              f"模型={u.get('model') or '全局'} 开放权限={gl}")
+    return 0
+
+
+def cmd_user(argv: list[str]) -> int:
+    if not argv:
+        print("用法：qq user <openid|me> [name=名字] [mb=9] [sec=300] [model=…] [access=allow|deny|auto]")
+        return 2
+    uid = _user_ref(argv[0])
+    kv = _kv(argv[1:])
+    if not kv:
+        r = _api("GET", "/users")
+        if not r or not r.get("ok"):
+            print("桥没在跑")
+            return 1
+        for u in r.get("users") or []:
+            if u["uid"] == uid:
+                print(f"{uid}\n{u}")
+                return 0
+        print(f"{uid}\n没有单独配置（跟随群/全局）")
+        return 0
+    payload = {"uid": uid}
+    if kv.get("name"):
+        payload["name"] = kv["name"]
+    if kv.get("mb") or kv.get("limit"):
+        v = kv.get("mb") or kv.get("limit")
+        payload["limit_mb"] = None if v in {"0", "off", "none", "-"} else float(v)
+    if kv.get("sec") or kv.get("timeout"):
+        payload["max_seconds"] = int(kv.get("sec") or kv.get("timeout"))
+    if "model" in kv:
+        payload["model"] = "" if kv["model"].lower() in {"default", "global", "-"} else kv["model"]
+    guest_val, has_guest = _guest_value(kv)
+    if has_guest:
+        payload["guest"] = guest_val
+    r = _api("POST", "/user/set", payload)
+    if not r or not r.get("ok"):
+        print("保存失败：" + ((r or {}).get("error") or "桥没在跑"))
+        return 1
+    print(f"已保存 {uid} → {r.get('user')}")
+    return 0
+
+
+def cmd_userdel(argv: list[str]) -> int:
+    if not argv:
+        print("用法：qq userdel <openid|me>")
+        return 2
+    uid = _user_ref(argv[0])
+    r = _api("POST", "/user/del", {"uid": uid})
+    print("已清除用户配置" if r and r.get("ok") else "本来就没有配置")
+    return 0
+
+
+def cmd_ulimit(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print("用法：qq ulimit <openid|me> <MB|0>")
+        return 2
+    uid = _user_ref(argv[0])
+    v = argv[1]
+    limit = None if v in {"0", "off", "none", "-"} else float(v)
+    r = _api("POST", "/user/set", {"uid": uid, "limit_mb": limit})
+    if not r or not r.get("ok"):
+        print("保存失败：" + ((r or {}).get("error") or "桥没在跑"))
+        return 1
+    print(f"{uid} 的附件限额 → {'不限' if limit is None else f'{limit:g}MB'}")
+    return 0
+
+
+def cmd_grebind(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print("用法：qq grebind <旧群ID或群名> <新群ID>")
+        return 2
+    r = _api("POST", "/group/rebind", {"old": argv[0], "new": argv[1]})
+    if not r or not r.get("ok"):
+        print("迁移失败：" + ((r or {}).get("error") or "桥没在跑"))
+        return 1
+    print(f"已迁移 {r.get('old')} → {r.get('new')}")
+    return 0
+
+
+def cmd_galias(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print("用法：qq galias <群ID或群名> <别名>")
+        return 2
+    # 先解析群，再走群配置写入别名
+    r = _api("GET", "/groups")
+    if not r or not r.get("ok"):
+        print("桥没在跑")
+        return 1
+    ref = argv[0].strip().lower()
+    gid = None
+    for g in r.get("groups") or []:
+        names = [g.get("display") or "", *(g.get("aliases") or [])]
+        if g["gid"].lower() == ref or any(str(n).lower() == ref for n in names if n):
+            gid = g["gid"]
+            break
+    if not gid:
+        print("没找到这个群")
+        return 1
+    alias = " ".join(argv[1:])
+    # 控制接口没有单独 alias 路由，直接用 bridge 模块写
+    ok = bridge.gc.add_group_alias(gid, alias)
+    print(f"已给 {gid} 加别名：{alias}" if ok else "保存失败")
+    return 0 if ok else 1
+
+
+def cmd_sessrename(argv: list[str]) -> int:
+    if len(argv) < 3:
+        print("用法：qq sessrename <key> <旧名> <新名>")
+        return 2
+    r = _api("POST", "/session/rename", {"key": argv[0], "old": argv[1], "new": " ".join(argv[2:])})
+    if not r or not r.get("ok"):
+        print("重命名失败：" + ((r or {}).get("error") or "桥没在跑"))
+        return 1
+    print(f"已重命名 {argv[1]} → {r.get('new')}")
+    return 0
+
+
+def cmd_web(argv: list[str]) -> int:
+    action = (argv[0].lower() if argv else "status")
+    pid = _web_pid()
+    if action in ("status", ""):
+        print(f"网页面板：{'运行中 PID=%s  http://127.0.0.1:6200' % pid if pid else '未运行'}")
+        return 0
+    if action == "stop":
+        if not pid:
+            print("本来就没在跑")
+            return 0
+        try:
+            os.kill(pid, 15)
+        except Exception:
+            pass
+        MANAGE_PID.unlink(missing_ok=True)
+        print("已停止")
+        return 0
+    if action == "start":
+        if pid:
+            print(f"已在运行 PID={pid}  http://127.0.0.1:6200")
+            return 0
+        proc = subprocess.Popen(
+            [sys.executable, str(BASE / "manage.py")],
+            cwd=str(BASE), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        MANAGE_PID.write_text(str(proc.pid))
+        print(f"已启动 PID={proc.pid}\n打开：http://127.0.0.1:6200")
+        return 0
+    print("用法：qq web [start|stop|status]")
+    return 2
+
+
 def cmd_service(action: str) -> int:
     script = BASE / ("run.sh" if action in ("start", "restart") else "stop.sh")
     if action == "restart":
@@ -285,6 +995,9 @@ def main() -> int:
         print(__doc__)
         return 0
     cmd, rest = argv[0], argv[1:]
+    if cmd in ("help", "?", "帮助"):
+        print(bridge.help_detail(rest[0]) if rest else bridge.help_overview())
+        return 0
     if cmd == "status":
         return cmd_status()
     if cmd == "tail":
@@ -297,6 +1010,48 @@ def main() -> int:
         return cmd_sessions()
     if cmd == "invite":
         return cmd_invite()
+    if cmd in ("mode", "模式"):
+        return cmd_mode(rest)
+    if cmd in ("groups", "群配置"):
+        return cmd_groups()
+    if cmd == "gadd":
+        return cmd_gadd(rest)
+    if cmd == "gdel":
+        return cmd_gdel(rest)
+    if cmd == "grebind":
+        return cmd_grebind(rest)
+    if cmd == "galias":
+        return cmd_galias(rest)
+    if cmd in ("users", "用户"):
+        return cmd_users()
+    if cmd == "user":
+        return cmd_user(rest)
+    if cmd == "userdel":
+        return cmd_userdel(rest)
+    if cmd == "ulimit":
+        return cmd_ulimit(rest)
+    if cmd in ("access", "权限"):
+        return cmd_access(rest)
+    if cmd in ("quota", "限额"):
+        return cmd_quota(rest)
+    if cmd in ("defaults", "默认"):
+        return cmd_defaults(rest)
+    if cmd in ("panel", "面板"):
+        return cmd_panel(rest)
+    if cmd in ("receive", "接收"):
+        return cmd_receive(rest)
+    if cmd in ("history", "记录"):
+        return cmd_history(rest)
+    if cmd == "sess":
+        return cmd_sess(rest)
+    if cmd == "sessdel":
+        return cmd_sessdel(rest)
+    if cmd == "sessrename":
+        return cmd_sessrename(rest)
+    if cmd == "models":
+        return cmd_models(rest)
+    if cmd in ("web", "面板"):
+        return cmd_web(rest)
     if cmd in ("start", "stop", "restart"):
         return cmd_service(cmd)
     if cmd == "log":
