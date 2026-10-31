@@ -1,6 +1,6 @@
 # OpenCode 技能使用手册
 
-一套在 **Android + Termux + OpenCode** 环境下运行的技能手册合集，覆盖手机控制、B 站、GitHub、下载器、离线转写、CNE 模组和 QQ 机器人等场景。
+一套在 **Android + Termux + OpenCode** 环境下运行的技能手册合集，覆盖手机控制、B 站、GitHub、下载器、离线转写、CNE 模组、QQ 机器人、人设/心情/长期记忆和本机服务编排等场景。
 
 - 每个技能目录下有 `SKILL.md`：技能声明、使用说明、示例
 - 多数技能附带可直接运行的 `scripts/`（已脱敏）
@@ -10,6 +10,7 @@
 
 ## 变更记录
 
+- **2026-10-31**：新增 `dafeiyu-persona`、`dafeiyu-mood`、`meow-memory`——把 dsh 的人设 / 心情 / 记忆三个插件改成 OpenCode 技能版，状态存本地 JSON，**只在用户点名时调用**，不做每轮自动注入；新增 `dsh-stack`（dsh Web UI + QQ 桥 + 管理网站三件套起停）。
 - **2026-10-27**：新增 `cne-touch-port`、`cne-vhs-filter`、`generic-app-install`、`generic-repo-push`。
 - **2026-10-27**：新增 `deepseek-web`（网页版转本地 OpenAI 端点）。**非官方逆向接口，可能触发风控，文档已标注不建议日常使用**。
 - **2026-10-24**：新增 `cne-mod-patch`（CNE 模组文件热更：备份、推送、哈希校验、重启）。
@@ -26,17 +27,21 @@
 | `bilibili-web` | B 站网页/API：登录、视频、评论、动态、搜索、收藏、三连、弹幕 | [SKILL.md](skills/bilibili-web/SKILL.md) · [scripts](skills/bilibili-web/scripts) |
 | `bili-im` | B 站私信：按昵称找人、发私信、读会话 | [SKILL.md](skills/bili-im/SKILL.md) · [scripts](skills/bili-im/scripts) |
 | `bili-replies` | B 站评论区回声：查自己评论下的新回复并逐条回复 | [SKILL.md](skills/bili-replies/SKILL.md) |
+| `dafeiyu-persona` | 大肥鱼人设库：内置两套人设，全局/工作区/会话三档切换 | [SKILL.md](skills/dafeiyu-persona/SKILL.md) · [personas](skills/dafeiyu-persona/personas) |
+| `dafeiyu-mood` | 33 种心情的本地状态引擎：打分、回落、混合态、防抖 | [SKILL.md](skills/dafeiyu-mood/SKILL.md) · [mood.py](skills/dafeiyu-mood/mood.py) |
 | `feiyu-persona` | 大肥鱼人格：QQ 群友口吻的短句说话方式 | [SKILL.md](skills/feiyu-persona/SKILL.md) |
 | `browser` | 后台浏览器：UA、重定向、Cookie、表单、HTML 转文本 | [SKILL.md](skills/browser/SKILL.md) · [scripts](skills/browser/scripts) |
 | `cne-mod-patch` | CNE 模组文件热更：备份、推送、哈希校验、重启游戏 | [SKILL.md](skills/cne-mod-patch/SKILL.md) |
 | `cne-touch-port` | CNE touch 仓库改造成新 Port：模板复制、改包名、Actions 构建 | [SKILL.md](skills/cne-touch-port/SKILL.md) |
 | `cne-vhs-filter` | CNE 模组 VHS/CRT 滤镜与备用生命图标 | [SKILL.md](skills/cne-vhs-filter/SKILL.md) |
 | `deepseek-web` | DeepSeek 网页版转本地 OpenAI 端点（非官方，注意风控） | [SKILL.md](skills/deepseek-web/SKILL.md) · [scripts](skills/deepseek-web/scripts) |
+| `dsh-stack` | 一键起停 dsh Web UI、QQ 机器人桥、QQ 管理网站 | [SKILL.md](skills/dsh-stack/SKILL.md) |
 | `generic-app-install` | 通用安装：APK / split APK / Termux 包，并验证能启动 | [SKILL.md](skills/generic-app-install/SKILL.md) |
 | `generic-repo-push` | 通用 Git 提交/推送：任意仓库与远端，含 TLS 失败兜底 | [SKILL.md](skills/generic-repo-push/SKILL.md) |
 | `github` | GitHub：搜索、文件、Issue/PR、fork/star/clone、建仓库、发文件 | [SKILL.md](skills/github/SKILL.md) · [scripts](skills/github/scripts) |
 | `gopeed` | 手机 Gopeed 下载器：新建/暂停/继续/删除任务 | [SKILL.md](skills/gopeed/SKILL.md) · [scripts](skills/gopeed/scripts) |
 | `media-transcribe` | 离线转写：Paraformer（中文）/ Whisper（英文） | [SKILL.md](skills/media-transcribe/SKILL.md) · [scripts](skills/media-transcribe/scripts) |
+| `meow-memory` | 七层长期记忆：关键词检索、去重合并、定期整理 | [SKILL.md](skills/meow-memory/SKILL.md) · [memory.py](skills/meow-memory/memory.py) |
 | `phone-back` | Android 返回键 | [SKILL.md](skills/phone-back/SKILL.md) |
 | `phone-home` | Android 主界面键 | [SKILL.md](skills/phone-home/SKILL.md) |
 | `phone-recents` | Android 多任务键 | [SKILL.md](skills/phone-recents/SKILL.md) |
@@ -53,17 +58,21 @@
 | `bilibili-web` | `bili.*` 工具或 `bili.js`；Node 24+；B 站 cookie |
 | `bili-im` | `bili_im.*` 工具或 `bili-im` CLI；Python 3.9+；B 站 cookie |
 | `bili-replies` | Node 24+，共用 B 站 cookie |
+| `dafeiyu-persona` | Python 3.10+（仅标准库）、`~/.config/opencode/state/persona.json` |
+| `dafeiyu-mood` | Python 3.10+（仅标准库）、`~/.config/opencode/state/dafeiyu/mood.json` |
 | `feiyu-persona` | 无依赖，纯提示词 |
 | `browser` | `web.fetch` 工具或 `fetch.js` / `curl`；Node 24+ |
 | `cne-mod-patch` | `adb` 或 Portal、`sha256sum`、Termux |
 | `cne-touch-port` | `gh`、`git`、GitHub Actions |
 | `cne-vhs-filter` | CNE 源码、`glslangValidator`（可选） |
 | `deepseek-web` | Node 24+、`curl`、`base64`、DeepSeek 网页账号 |
+| `dsh-stack` | `~/dsh` 启动脚本、QQ 桥 MCP 工具、`qq web`、`curl` |
 | `generic-app-install` | `phone_install` 或 `adb`、`pkg`、`pip` |
 | `generic-repo-push` | `git`、`gh`、`ssh-keygen` |
 | `github` | Bun 插件、`gh` 2.40+、`git`、`jq` |
 | `gopeed` | `gopeed.*` 工具或 `gopeed` CLI、Gopeed 1.9+ API、`curl`、`jq` |
 | `media-transcribe` | `media.transcribe` 工具；Python 3.10+、`sherpa-onnx`、`ffmpeg`、80MB 模型 |
+| `meow-memory` | Python 3.10+（仅标准库）、`~/.config/opencode/state/meow-memory/memory.json` |
 | `phone-back` | OpenCode 插件、Portal 或 adb |
 | `phone-home` | OpenCode 插件、Portal 或 adb |
 | `phone-recents` | OpenCode 插件、Portal 或 adb |
@@ -84,6 +93,8 @@
 ```
 skills/<技能名>/SKILL.md
 skills/<技能名>/scripts/...      # 部分技能附带
+skills/<技能名>/*.py             # 部分技能直接带引擎脚本
+~/.config/opencode/state/        # 技能运行状态（不随仓库分发）
 ENVIRONMENT.md                   # 依赖与端口总表
 ```
 

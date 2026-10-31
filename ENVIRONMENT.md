@@ -16,7 +16,7 @@ pkg install -y bash coreutils curl jq git nodejs python ffmpeg gh termux-api
 | jq | 1.8 | ai-bridge、gopeed、phone-ops、github |
 | git | 2.56 | github（clone/push）、脚本仓库 |
 | nodejs | 24.x | bilibili-web、browser |
-| python | 3.14 | media-transcribe、bili-im、qq-bot-bridge |
+| python | 3.14 | media-transcribe、bili-im、qq-bot-bridge、dafeiyu-persona、dafeiyu-mood、meow-memory |
 | ffmpeg | 9.x | media-transcribe、video-watch |
 | gh | 2.103 | github |
 | termux-api | 0.60 | phone-ops（termux-toast，可选） |
@@ -32,7 +32,7 @@ pip install sherpa-onnx aiohttp pyyaml
 | `sherpa-onnx` | media-transcribe、video-watch | 离线语音识别 |
 | `aiohttp` | qq-bot-bridge | QQ 开放平台 WebSocket/HTTP |
 | `PyYAML` | qq-bot-bridge | 读 `config.yaml` |
-| 标准库 | bili-im | 不需要额外安装 |
+| 标准库 | bili-im、dafeiyu-persona、dafeiyu-mood、meow-memory | 不需要额外安装 |
 
 ## 3. 模型
 
@@ -56,14 +56,19 @@ pip install sherpa-onnx aiohttp pyyaml
 | --- | --- | --- |
 | 8080 | Portal HTTP API | 127.0.0.1 |
 | 9999 | Gopeed API | 127.0.0.1 |
+| 3080 | dsh Web UI | 127.0.0.1 |
+| 6199 | QQ 桥控制接口 | 127.0.0.1 |
+| 6200 | QQ 管理网站 | 127.0.0.1 |
 
 ## 6. 目录布局
 
 ```
 ~/.config/opencode/skills/     技能与脚本
 ~/.config/opencode/plugins/    插件（github、gopeed、web-tools、cli-bridge 等）
+~/.config/opencode/state/      技能状态：人设选择、心情、长期记忆（不分发）
 ~/.cache/opencode/             缓存：bili cookies、asr 模型、browser 响应、pq 树
 ~/repos/                       github.clone 默认目录
+~/dsh/                         dsh Web UI、启动脚本与日志
 ~/qqbot/                       QQ 桥主程序、配置、历史
 ~/portal/                      Portal token
 ~/.config/ai/providers.conf    ai CLI 模型别名
@@ -80,6 +85,8 @@ pip install sherpa-onnx aiohttp pyyaml
 | 操作手机 App | Portal（或 adb）+ `pq` |
 | CNE 模组热更 | adb（shell UID）或 Portal；`sha256sum` |
 | QQ 机器人 | Python + `aiohttp` + 官方机器人凭据 + `opencode` |
+| 起停 dsh / QQ 桥 / 管理网站 | `~/dsh` 启动脚本 + QQ 桥 MCP 工具 + `qq web` |
+| 人设 / 心情 / 长期记忆 | Python 3（仅标准库）+ `~/.config/opencode/state/` |
 
 ## 8. 已知限制
 
