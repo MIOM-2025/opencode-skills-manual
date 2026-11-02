@@ -11,21 +11,21 @@
   qq sessions            列出所有桥接会话
   qq mode [owner|open]   查看/切换对话模式（owner=仅主人，open=所有人）
   qq groups              查看所有群配置
-  qq gadd <群ID或群名> [k=v…]  设置群配置：name= mb= sec= model= access=allow|deny|auto
+  qq gadd <群ID或群名> [k=v…]  设置群配置：name= mb= sec= model= backend= access=allow|deny|auto
   qq gdel <群ID或群名>   删除群配置
   qq grebind <旧群> <新群ID>   群号变了时迁移配置
   qq galias <群> <别名>  给群加别名
   qq users               列出用户单独配置
-  qq user <openid|me> [k=v…]  设置用户限额/模型：name= mb= sec= model= access=
+  qq user <openid|me> [k=v…]  设置用户限额/模型：name= mb= sec= model= backend= access=
   qq userdel <openid|me> 清除用户配置
   qq ulimit <openid|me> <MB|0>  快捷设置用户附件上限
   qq access [scope target allow|deny|auto]  个人/群/会话开放权限
   qq quota [scope target MB|0]  个人/群/会话/全局限额
-  qq defaults [limit=MB] [sec=N] [model=…]  全局默认限额/超时/模型
+  qq defaults [limit=MB] [sec=N] [model=…] [backend=auto|dsh|opencode]  全局默认
   qq panel [status|install|refresh]  官方指令面板 / 自定义菜单
   qq receive             检查群消息接收状态（全量消息 / 仅 @）
   qq history [key|all] [N] [关键词]  查看聊天存档
-  qq sess <key> [k=v…]   给单个会话设覆盖：mb= sec= model= access=
+  qq sess <key> [k=v…]   给单个会话设覆盖：mb= sec= model= backend= access=
   qq sessdel <key>       清除会话覆盖
   qq sessrename <key> <旧名> <新名>  重命名会话
   qq models              列出可切换的模型
@@ -39,6 +39,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -327,7 +328,7 @@ def cmd_groups() -> int:
 
 def cmd_gadd(argv: list[str]) -> int:
     if not argv:
-        print("用法：qq gadd <群ID> [name=显示名] [mb=9] [sec=300] [model=…] [access=allow|deny|auto]")
+        print("用法：qq gadd <群ID> [name=显示名] [mb=9] [sec=300] [model=…] [backend=auto|dsh|opencode] [access=allow|deny|auto]")
         return 2
     gid = argv[0]
     kv = _kv(argv[1:])
@@ -339,8 +340,18 @@ def cmd_gadd(argv: list[str]) -> int:
         payload["limit_mb"] = None if v in {"0", "off", "none", "-"} else float(v)
     if kv.get("sec") or kv.get("timeout"):
         payload["max_seconds"] = int(kv.get("sec") or kv.get("timeout"))
+    for _k, _f in (("model_admin", "model_admin"), ("admin_model", "model_admin"),
+                   ("model_guest", "model_guest"), ("guest_model", "model_guest")):
+        if _k in kv:
+            payload[_f] = "" if kv[_k].lower() in {"default", "global", "-"} else kv[_k]
     if "model" in kv:
         payload["model"] = "" if kv["model"].lower() in {"default", "global", "-"} else kv["model"]
+    if "backend" in kv:
+        b = kv["backend"].lower()
+        if b not in {"auto", "default", "follow", "dsh", "opencode"}:
+            print("backend 只能是 auto / dsh / opencode")
+            return 2
+        payload["backend"] = "" if b in {"auto", "default", "follow"} else b
     guest_val, has_guest = _guest_value(kv)
     if has_guest:
         payload["guest"] = guest_val
@@ -363,7 +374,7 @@ def cmd_gdel(argv: list[str]) -> int:
 
 def cmd_sess(argv: list[str]) -> int:
     if not argv:
-        print("用法：qq sess <会话key> [mb=9] [sec=300] [model=…] [access=allow|deny|auto]")
+        print("用法：qq sess <会话key> [mb=9] [sec=300] [model=…] [backend=auto|dsh|opencode] [access=allow|deny|auto]")
         return 2
     key = argv[0]
     kv = _kv(argv[1:])
@@ -373,8 +384,18 @@ def cmd_sess(argv: list[str]) -> int:
         payload["limit_mb"] = None if v in {"0", "off", "none", "-"} else float(v)
     if kv.get("sec") or kv.get("timeout"):
         payload["max_seconds"] = int(kv.get("sec") or kv.get("timeout"))
+    for _k, _f in (("model_admin", "model_admin"), ("admin_model", "model_admin"),
+                   ("model_guest", "model_guest"), ("guest_model", "model_guest")):
+        if _k in kv:
+            payload[_f] = "" if kv[_k].lower() in {"default", "global", "-"} else kv[_k]
     if "model" in kv:
         payload["model"] = "" if kv["model"].lower() in {"default", "global", "-"} else kv["model"]
+    if "backend" in kv:
+        b = kv["backend"].lower()
+        if b not in {"auto", "default", "follow", "dsh", "opencode"}:
+            print("backend 只能是 auto / dsh / opencode")
+            return 2
+        payload["backend"] = "" if b in {"auto", "default", "follow"} else b
     guest_val, has_guest = _guest_value(kv)
     if has_guest:
         payload["guest"] = guest_val
@@ -409,9 +430,18 @@ def cmd_models(argv: list[str] | None = None) -> int:
     elif arg:
         picked = [(i, m) for i, m in enumerate(models, 1) if arg.lower() in m.lower()]
     else:
-        picked = [(i, m) for i, m in enumerate(models, 1) if m.startswith("opencode/")]
+        picked = [(i, m) for i, m in enumerate(models, 1)
+                  if m.startswith("opencode/") or m.startswith("dsh/")]
+    routes = r.get("routes") or {}
+    def _backend_label(m):
+        b = routes.get(m)
+        if not b:
+            low = m.lower()
+            b = "dsh" if (low.startswith("dsh/") or low.startswith("deepseek/")
+                           or low in {"deepseek-chat", "deepseek-reasoner", "deepseek-flash"}) else "opencode"
+        return "DSH" if b == "dsh" else "OpenCode"
     for i, m in picked:
-        print(f"{i}. {m}")
+        print(f"{i}. {m}  [{_backend_label(m)}]")
     if not arg:
         print(f"\n共 {len(models)} 个，其他 provider {len(models) - len(picked)} 个：qq models all 或 qq models <关键词>")
     print(f"全局默认：{r.get('global') or '(未设置)'}")
@@ -550,8 +580,11 @@ def cmd_defaults(argv: list[str]) -> int:
         print(f"  限额：{'不限' if limit is None else f'{limit:g}MB'}")
         print(f"  超时：{sec}s" if sec else "  超时：程序默认")
         print(f"  模型：{model}")
-        print("\n用法：qq defaults limit=10 sec=600 model=opencode/xxx")
-        print("      limit=0 / sec=0 / model=default 表示回到默认")
+        print(f"  管理员档：{d.get('model_admin') or '跟随模型'}")
+        print(f"  非管理员档：{d.get('model_guest') or '跟随模型'}")
+        print(f"  后端：{d.get('backend') or '按模型自动（默认）'}")
+        print("\n用法：qq defaults limit=10 sec=600 model=opencode/xxx model_admin=… model_guest=… backend=dsh")
+        print("      limit=0 / sec=0 / model=default / backend=auto 表示回到默认")
         return 0
     payload = {}
     try:
@@ -568,8 +601,21 @@ def cmd_defaults(argv: list[str]) -> int:
                 payload["max_seconds"] = 0 if v.lower() in {"", "0", "none", "off", "-"} else int(float(v))
             elif k in {"model", "模型"}:
                 payload["model"] = "" if v.lower() in {"", "0", "none", "off", "-", "default", "global"} else v
+            elif k in {"model_admin", "admin", "管理员档"}:
+                payload["model_admin"] = "" if v.lower() in {"", "0", "none", "off", "-", "default", "global"} else v
+            elif k in {"model_guest", "guest", "非管理员档"}:
+                payload["model_guest"] = "" if v.lower() in {"", "0", "none", "off", "-", "default", "global"} else v
+            elif k in {"backend", "后端"}:
+                b = v.lower()
+                if b in {"", "0", "none", "off", "-", "auto", "default", "global", "跟随"}:
+                    payload["backend"] = ""
+                elif b in {"opencode", "dsh"}:
+                    payload["backend"] = b
+                else:
+                    print("backend 只能是 opencode / dsh / auto")
+                    return 2
             else:
-                print(f"不认识的字段：{k}（可用 limit / sec / model）")
+                print(f"不认识的字段：{k}（可用 limit / sec / model / backend）")
                 return 2
     except ValueError:
         print("limit 要填数字，sec 要填整数")
@@ -713,7 +759,16 @@ def _web_pid() -> int | None:
         os.kill(pid, 0)
         return pid
     except Exception:
-        return None
+        pass
+    # PID 文件丢了也不要紧，按进程名兜底找一次
+    try:
+        out = subprocess.run(["pgrep", "-f", "manage.py"], capture_output=True, text=True)
+        for line in (out.stdout or "").split():
+            if line.strip().isdigit():
+                return int(line)
+    except Exception:
+        pass
+    return None
 
 
 def _me_uid() -> str:
@@ -756,7 +811,7 @@ def cmd_users() -> int:
 
 def cmd_user(argv: list[str]) -> int:
     if not argv:
-        print("用法：qq user <openid|me> [name=名字] [mb=9] [sec=300] [model=…] [access=allow|deny|auto]")
+        print("用法：qq user <openid|me> [name=名字] [mb=9] [sec=300] [model=…] [backend=auto|dsh|opencode] [access=allow|deny|auto]")
         return 2
     uid = _user_ref(argv[0])
     kv = _kv(argv[1:])
@@ -779,8 +834,18 @@ def cmd_user(argv: list[str]) -> int:
         payload["limit_mb"] = None if v in {"0", "off", "none", "-"} else float(v)
     if kv.get("sec") or kv.get("timeout"):
         payload["max_seconds"] = int(kv.get("sec") or kv.get("timeout"))
+    for _k, _f in (("model_admin", "model_admin"), ("admin_model", "model_admin"),
+                   ("model_guest", "model_guest"), ("guest_model", "model_guest")):
+        if _k in kv:
+            payload[_f] = "" if kv[_k].lower() in {"default", "global", "-"} else kv[_k]
     if "model" in kv:
         payload["model"] = "" if kv["model"].lower() in {"default", "global", "-"} else kv["model"]
+    if "backend" in kv:
+        b = kv["backend"].lower()
+        if b not in {"auto", "default", "follow", "dsh", "opencode"}:
+            print("backend 只能是 auto / dsh / opencode")
+            return 2
+        payload["backend"] = "" if b in {"auto", "default", "follow"} else b
     guest_val, has_guest = _guest_value(kv)
     if has_guest:
         payload["guest"] = guest_val
@@ -887,6 +952,7 @@ def cmd_web(argv: list[str]) -> int:
     if action == "start":
         if pid:
             print(f"已在运行 PID={pid}  http://127.0.0.1:6200")
+            _open_panel()
             return 0
         proc = subprocess.Popen(
             [sys.executable, str(BASE / "manage.py")],
@@ -895,19 +961,41 @@ def cmd_web(argv: list[str]) -> int:
         )
         MANAGE_PID.write_text(str(proc.pid))
         print(f"已启动 PID={proc.pid}\n打开：http://127.0.0.1:6200")
+        time.sleep(1)
+        _open_panel()
         return 0
     print("用法：qq web [start|stop|status]")
     return 2
+
+
+def _open_panel() -> None:
+    """在 Termux 里顺手用浏览器打开面板；没有 termux-open-url 就只打印地址。"""
+    url = "http://127.0.0.1:6200/"
+    if not shutil.which("termux-open-url"):
+        return
+    try:
+        subprocess.Popen(["termux-open-url", url], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+        print("已在浏览器打开面板")
+    except Exception:
+        pass
 
 
 def cmd_service(action: str) -> int:
     script = BASE / ("run.sh" if action in ("start", "restart") else "stop.sh")
     if action == "restart":
         subprocess.run([str(BASE / "stop.sh")], capture_output=True)
+        cmd_web(["stop"])
         time.sleep(1)
         script = BASE / "run.sh"
     r = subprocess.run([str(script)], capture_output=True, text=True)
     print((r.stdout or "").strip() or (r.stderr or "").strip())
+    # 机器人本体和网页面板一起启停，省得再记一条命令
+    if action in ("start", "restart"):
+        time.sleep(1)
+        cmd_web(["start"])
+    elif action == "stop":
+        cmd_web(["stop"])
     return r.returncode
 
 

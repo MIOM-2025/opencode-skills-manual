@@ -74,7 +74,8 @@ description: "This phone runs an official Tencent QQ bot (AppID <QQ_APP_ID>, bot
 
 **模型 / 当前聊天快捷**
 
-- `/models` 可用模型列表；`/model 3` 按序号切；`/model default` 回全局
+- `/models` 可用模型列表；`/model 3` 按序号切当前聊天；`/model default` 回全局
+- `/切换模型` 或 `/defaults` 查看全局默认；`/defaults model <完整名>` 改全局默认模型
 - `/limit 9` 附件上限 MB；`/limit 0` 取消
 - `/timeout 300` 超时秒数；`/timeout 0` 用全局
 - `/guest on|off|auto` 当前聊天的开放权限（auto=跟随）

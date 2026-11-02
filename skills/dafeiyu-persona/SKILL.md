@@ -49,3 +49,15 @@ python3 $P off                          # 临时闭嘴（保留选择）
 
 `persona.py import` 吃一个 Markdown 文件，第一行 `# 人设：名字` 作为名字，其余是正文。
 导出的文件能原样再导入回来（与插件行为一致）。
+
+## 环境要求
+
+| 项目 | 要求 |
+| --- | --- |
+| 运行时 | Python 3.10+（只用标准库，无第三方包） |
+| 程序文件 | `~/.config/opencode/skills/dafeiyu-persona/persona.py`、`personas/*.md` |
+| 状态文件 | `~/.config/opencode/state/persona.json`（全局 / 工作区 / 会话三档选择） |
+| 网络 | 不需要 |
+| 生效方式 | 切换后下一个回复立刻生效，不用重启服务 |
+| 限制 | 人设只影响语气和表演，不改变事实、安全边界与任务完成度 |
+

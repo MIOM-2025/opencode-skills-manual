@@ -10,6 +10,7 @@
 
 ## 变更记录
 
+- **2026-11-03**：同步 `qq` CLI 到最新版（群/用户/会话支持 `backend=`，模型分档字段兼容），补充 `feiyu-persona` 与 `dafeiyu-persona` 的分工说明。
 - **2026-10-31**：新增 `dafeiyu-persona`、`dafeiyu-mood`、`meow-memory`——把 dsh 的人设 / 心情 / 记忆三个插件改成 OpenCode 技能版，状态存本地 JSON，**只在用户点名时调用**，不做每轮自动注入；新增 `dsh-stack`（dsh Web UI + QQ 桥 + 管理网站三件套起停）。
 - **2026-10-27**：新增 `cne-touch-port`、`cne-vhs-filter`、`generic-app-install`、`generic-repo-push`。
 - **2026-10-27**：新增 `deepseek-web`（网页版转本地 OpenAI 端点）。**非官方逆向接口，可能触发风控，文档已标注不建议日常使用**。
@@ -27,7 +28,7 @@
 | `bilibili-web` | B 站网页/API：登录、视频、评论、动态、搜索、收藏、三连、弹幕 | [SKILL.md](skills/bilibili-web/SKILL.md) · [scripts](skills/bilibili-web/scripts) |
 | `bili-im` | B 站私信：按昵称找人、发私信、读会话 | [SKILL.md](skills/bili-im/SKILL.md) · [scripts](skills/bili-im/scripts) |
 | `bili-replies` | B 站评论区回声：查自己评论下的新回复并逐条回复 | [SKILL.md](skills/bili-replies/SKILL.md) |
-| `dafeiyu-persona` | 大肥鱼人设库：内置两套人设，全局/工作区/会话三档切换 | [SKILL.md](skills/dafeiyu-persona/SKILL.md) · [personas](skills/dafeiyu-persona/personas) |
+| `dafeiyu-persona` | 大肥鱼人设库：两套人设，全局/工作区/会话三档切换 | [SKILL.md](skills/dafeiyu-persona/SKILL.md) · [personas](skills/dafeiyu-persona/personas) |
 | `dafeiyu-mood` | 33 种心情的本地状态引擎：打分、回落、混合态、防抖 | [SKILL.md](skills/dafeiyu-mood/SKILL.md) · [mood.py](skills/dafeiyu-mood/mood.py) |
 | `feiyu-persona` | 大肥鱼人格：QQ 群友口吻的短句说话方式 | [SKILL.md](skills/feiyu-persona/SKILL.md) |
 | `browser` | 后台浏览器：UA、重定向、Cookie、表单、HTML 转文本 | [SKILL.md](skills/browser/SKILL.md) · [scripts](skills/browser/scripts) |

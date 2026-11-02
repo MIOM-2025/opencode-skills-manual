@@ -92,3 +92,15 @@ python3 $S cycle                # 周期回落（距上次 ≥3~6h 才会真跑�
 python3 $S diary                # 当天心情摘要
 python3 $S set happy 60         # 手动调（调试/剧情需要）
 ```
+
+## 环境要求
+
+| 项目 | 要求 |
+| --- | --- |
+| 运行时 | Python 3.10+（只用标准库，无第三方包） |
+| 程序文件 | `~/.config/opencode/skills/dafeiyu-mood/mood.py` |
+| 状态文件 | `~/.config/opencode/state/dafeiyu/mood.json` |
+| 网络 | 不需要 |
+| 调用时机 | 只在用户明确问心情 / 要求记录 / 换心情时调用，不自动轮询 |
+| 限制 | 心情只影响语气和内心话，不影响交付质量 |
+
